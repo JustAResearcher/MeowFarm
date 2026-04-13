@@ -275,18 +275,263 @@ def _fs_to_dict(fs: FlightSheet) -> dict:
 
 # ── OC Profiles ──────────────────────────────────────────────────────
 
+class OcProfileCreate(BaseModel):
+    name: str
+    core_offset: int | None = None
+    mem_offset: int | None = None
+    core_lock: int | None = None
+    mem_lock: int | None = None
+    power_limit: int | None = None
+    fan_speed: int | None = None
+
+
 @router.get("/oc-profiles")
 def get_oc_profiles():
     db = get_db()
     return [_oc_to_dict(p) for p in OcProfile.get_all(db)]
 
 
+@router.post("/oc-profiles")
+def create_oc_profile(data: OcProfileCreate):
+    db = get_db()
+    if OcProfile.get_by_name(db, data.name):
+        raise HTTPException(400, f"OC profile '{data.name}' already exists")
+    p = OcProfile(name=data.name, core_offset=data.core_offset,
+                  mem_offset=data.mem_offset, core_lock=data.core_lock,
+                  mem_lock=data.mem_lock, power_limit=data.power_limit,
+                  fan_speed=data.fan_speed)
+    p.save(db)
+    return _oc_to_dict(OcProfile.get_by_name(db, data.name))
+
+
+@router.delete("/oc-profiles/{name}")
+def delete_oc_profile(name: str):
+    db = get_db()
+    p = OcProfile.get_by_name(db, name)
+    if not p:
+        raise HTTPException(404)
+    p.delete(db)
+    return {"status": "deleted"}
+
+
+@router.post("/oc-profiles/{oc_name}/apply/{target}")
+async def apply_oc_profile(oc_name: str, target: str):
+    """Apply OC profile to rig(s) and deploy a persistent boot script."""
+    from mfarm.targets import resolve_targets
+    db = get_db()
+    profile = OcProfile.get_by_name(db, oc_name)
+    if not profile:
+        raise HTTPException(404, f"OC profile '{oc_name}' not found")
+
+    rigs = resolve_targets(db, target)
+    pool = get_pool()
+    loop = asyncio.get_event_loop()
+    results = {}
+
+    for rig in rigs:
+        try:
+            rig.oc_profile_id = profile.id
+            rig.save(db)
+
+            # Build the OC apply script that persists through reboots
+            oc_script = '#!/bin/bash\nsleep 5\nkillall Xorg 2>/dev/null\nnohup Xorg :0 -config /etc/X11/xorg.conf > /dev/null 2>&1 &\nsleep 4\nexport DISPLAY=:0\n'
+            oc_script += 'GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | wc -l)\n'
+            oc_script += 'for i in $(seq 0 $((GPU_COUNT-1))); do\n'
+            if profile.core_offset is not None:
+                oc_script += f'  nvidia-settings -a "[gpu:$i]/GPUGraphicsClockOffsetAllPerformanceLevels={profile.core_offset}" > /dev/null 2>&1\n'
+            if profile.mem_offset is not None:
+                oc_script += f'  nvidia-settings -a "[gpu:$i]/GPUMemoryTransferRateOffsetAllPerformanceLevels={profile.mem_offset}" > /dev/null 2>&1\n'
+            if profile.core_lock is not None:
+                oc_script += f'  nvidia-smi -i $i -lgc {profile.core_lock},{profile.core_lock} > /dev/null 2>&1\n'
+            if profile.mem_lock is not None:
+                oc_script += f'  nvidia-smi -i $i -lmc {profile.mem_lock},{profile.mem_lock} > /dev/null 2>&1\n'
+            if profile.power_limit is not None:
+                oc_script += f'  nvidia-smi -i $i -pl {profile.power_limit} > /dev/null 2>&1\n'
+            if profile.fan_speed is not None:
+                oc_script += f'  nvidia-settings -a "[gpu:$i]/GPUFanControlState=1" > /dev/null 2>&1\n'
+                oc_script += f'  nvidia-settings -a "[fan:$i]/GPUTargetFanSpeed={profile.fan_speed}" > /dev/null 2>&1\n'
+            oc_script += 'done\n'
+            oc_script += 'nvidia-smi -pm 1 > /dev/null 2>&1\n'
+            oc_script += f'echo "OC {oc_name} applied at $(date)" >> /var/log/mfarm/oc.log\n'
+
+            # Upload OC script
+            await loop.run_in_executor(
+                _executor, lambda r=rig, s=oc_script: pool.upload_string(r, s, "/opt/mfarm/apply-oc.sh")
+            )
+            await loop.run_in_executor(
+                _executor, lambda r=rig: pool.exec(r, "chmod +x /opt/mfarm/apply-oc.sh", timeout=5)
+            )
+
+            # Create systemd service for boot persistence
+            svc = '[Unit]\nDescription=MeowFarm GPU Overclock\nAfter=multi-user.target\nWants=mfarm-agent.service\n\n[Service]\nType=oneshot\nExecStart=/opt/mfarm/apply-oc.sh\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n'
+            await loop.run_in_executor(
+                _executor, lambda r=rig, s=svc: pool.upload_string(r, s, "/etc/systemd/system/mfarm-oc.service")
+            )
+            await loop.run_in_executor(
+                _executor, lambda r=rig: pool.exec(r, "systemctl daemon-reload && systemctl enable mfarm-oc.service", timeout=10)
+            )
+
+            # Apply now
+            await loop.run_in_executor(
+                _executor, lambda r=rig: pool.exec(r, "bash /opt/mfarm/apply-oc.sh", timeout=30)
+            )
+
+            results[rig.name] = "applied (persists on reboot)"
+        except Exception as e:
+            results[rig.name] = f"error: {e}"
+
+    return {"results": results}
+
+
 def _oc_to_dict(p: OcProfile) -> dict:
     return {
         "name": p.name, "core_offset": p.core_offset, "mem_offset": p.mem_offset,
+        "core_lock": p.core_lock, "mem_lock": p.mem_lock,
         "power_limit": p.power_limit, "fan_speed": p.fan_speed,
         "per_gpu": p.per_gpu,
     }
+
+
+# ── Miner Console ────────────────────────────────────────────────────
+
+@router.get("/rigs/{name}/miner-log/{miner_type}")
+async def get_miner_log(name: str, miner_type: str, lines: int = 80):
+    """Get the last N lines of a miner log."""
+    db = get_db()
+    rig = Rig.get_by_name(db, name)
+    if not rig:
+        raise HTTPException(404)
+    log_file = "/var/log/mfarm/xmrig.log" if miner_type == "cpu" else "/var/log/mfarm/miner.log"
+    pool = get_pool()
+    loop = asyncio.get_event_loop()
+    try:
+        stdout, _, _ = await loop.run_in_executor(
+            _executor, lambda: pool.exec(rig, f"tail -n {lines} {log_file} 2>/dev/null", timeout=5)
+        )
+        return {"log": stdout, "file": log_file}
+    except Exception as e:
+        return {"log": f"Error: {e}", "file": log_file}
+
+
+@router.post("/rigs/{name}/miner-api/{miner_type}")
+async def query_miner_api(name: str, miner_type: str, body: dict):
+    """Query miner API directly on the rig. For XMRig: HTTP API. For ccminer: TCP API."""
+    db = get_db()
+    rig = Rig.get_by_name(db, name)
+    if not rig:
+        raise HTTPException(404)
+    command = body.get("command", "summary")
+    pool = get_pool()
+    loop = asyncio.get_event_loop()
+
+    if miner_type == "cpu":
+        # XMRig HTTP API on port 44445
+        endpoint = {
+            "hashrate": "/2/backends",
+            "summary": "/1/summary",
+            "config": "/1/config",
+            "results": "/1/summary",
+        }.get(command, f"/1/{command}")
+        cmd = f"curl -s http://127.0.0.1:44445{endpoint} 2>/dev/null"
+    else:
+        # ccminer TCP API on port 4068
+        cmd = f"echo '{command}' | nc -w 2 127.0.0.1 4068 2>/dev/null"
+
+    try:
+        stdout, _, _ = await loop.run_in_executor(
+            _executor, lambda: pool.exec(rig, cmd, timeout=10)
+        )
+        # Try to parse as JSON for pretty display
+        try:
+            import json as _json
+            data = _json.loads(stdout.replace('\0', ''))
+            return {"result": data, "raw": False}
+        except Exception:
+            return {"result": stdout.replace('\0', ''), "raw": True}
+    except Exception as e:
+        return {"result": str(e), "raw": True}
+
+
+# ── Phone Home ───────────────────────────────────────────────────────
+
+@router.post("/phonehome")
+async def phonehome(body: dict):
+    """Receive phone-home from a MeowOS rig."""
+    from mfarm.web.app import _handle_phonehome, _discovered_rigs
+    _handle_phonehome(body)
+    return {"status": "ok"}
+
+
+@router.get("/discovered")
+def get_discovered():
+    """List all rigs that have phoned home but aren't added yet."""
+    from mfarm.web.app import _discovered_rigs
+    import time
+    db = get_db()
+    existing = {r.host for r in Rig.get_all(db)}
+    result = []
+    for mac, info in _discovered_rigs.items():
+        info_copy = dict(info)
+        info_copy["already_added"] = info["ip"] in existing
+        info_copy["age_secs"] = round(time.time() - info.get("last_seen", 0))
+        result.append(info_copy)
+    return result
+
+
+# ── MAC Address Lookup ───────────────────────────────────────────────
+
+@router.post("/find-by-mac")
+async def find_by_mac(body: dict):
+    """Scan the local subnet ARP table for a MAC address."""
+    import subprocess
+    import re
+
+    mac = body.get("mac", "").strip().lower()
+    if not mac:
+        raise HTTPException(400, "No MAC address provided")
+
+    # Normalize MAC to dash-separated (Windows ARP format)
+    mac_dashed = mac.replace(":", "-").lower()
+
+    loop = asyncio.get_event_loop()
+
+    def _scan():
+        # Ping sweep the subnet first to populate ARP table
+        # Find our local subnet
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*'}).IPAddress"],
+                capture_output=True, text=True, timeout=5)
+            local_ip = result.stdout.strip().split('\n')[0].strip()
+        except Exception:
+            local_ip = "192.168.68.78"
+
+        subnet = ".".join(local_ip.split(".")[:3])
+
+        # Quick ping sweep to populate ARP
+        for i in range(1, 255):
+            subprocess.Popen(
+                ["ping", "-n", "1", "-w", "200", f"{subnet}.{i}"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+
+        import time
+        time.sleep(5)
+
+        # Read ARP table
+        result = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=10)
+        for line in result.stdout.split("\n"):
+            line_lower = line.lower().strip()
+            if mac_dashed in line_lower:
+                # Extract IP from line like "  192.168.68.33        f4-b5-20-02-56-45     dynamic"
+                match = re.search(r'(\d+\.\d+\.\d+\.\d+)', line)
+                if match:
+                    return match.group(1)
+        return None
+
+    ip = await loop.run_in_executor(_executor, _scan)
+    return {"ip": ip, "mac": mac}
 
 
 # ── Groups ───────────────────────────────────────────────────────────

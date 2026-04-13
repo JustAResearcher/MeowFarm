@@ -241,6 +241,8 @@ class OcProfile:
     name: str = ""
     core_offset: int | None = None
     mem_offset: int | None = None
+    core_lock: int | None = None
+    mem_lock: int | None = None
     power_limit: int | None = None
     fan_speed: int | None = None
     per_gpu_overrides: str | None = None  # JSON
@@ -269,23 +271,27 @@ class OcProfile:
         if self.id is None:
             cur = db.execute(
                 """INSERT INTO oc_profiles
-                   (name, core_offset, mem_offset, power_limit, fan_speed,
+                   (name, core_offset, mem_offset, core_lock, mem_lock,
+                    power_limit, fan_speed,
                     per_gpu_overrides, amd_core_state, amd_mem_state, amd_voltage, notes)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (self.name, self.core_offset, self.mem_offset, self.power_limit,
-                 self.fan_speed, self.per_gpu_overrides, self.amd_core_state,
-                 self.amd_mem_state, self.amd_voltage, self.notes),
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (self.name, self.core_offset, self.mem_offset,
+                 self.core_lock, self.mem_lock,
+                 self.power_limit, self.fan_speed, self.per_gpu_overrides,
+                 self.amd_core_state, self.amd_mem_state, self.amd_voltage, self.notes),
             )
             self.id = cur.lastrowid
         else:
             db.execute(
                 """UPDATE oc_profiles SET name=?, core_offset=?, mem_offset=?,
+                   core_lock=?, mem_lock=?,
                    power_limit=?, fan_speed=?, per_gpu_overrides=?,
                    amd_core_state=?, amd_mem_state=?, amd_voltage=?, notes=?,
                    updated_at=datetime('now') WHERE id=?""",
-                (self.name, self.core_offset, self.mem_offset, self.power_limit,
-                 self.fan_speed, self.per_gpu_overrides, self.amd_core_state,
-                 self.amd_mem_state, self.amd_voltage, self.notes, self.id),
+                (self.name, self.core_offset, self.mem_offset,
+                 self.core_lock, self.mem_lock,
+                 self.power_limit, self.fan_speed, self.per_gpu_overrides,
+                 self.amd_core_state, self.amd_mem_state, self.amd_voltage, self.notes, self.id),
             )
         db.commit()
         return self

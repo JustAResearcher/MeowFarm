@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -113,13 +114,64 @@ def _build_rigs_payload() -> list[dict]:
     return result
 
 
+_discovered_rigs: dict[str, dict] = {}  # MAC -> {ip, hostname, last_seen}
+
+
+async def udp_listener():
+    """Listen for phone-home UDP broadcasts from MeowOS rigs."""
+    loop = asyncio.get_event_loop()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("0.0.0.0", 8889))
+    sock.setblocking(False)
+
+    while True:
+        try:
+            data = await loop.sock_recv(sock, 4096)
+            msg = json.loads(data.decode())
+            if msg.get("type") == "phonehome":
+                _handle_phonehome(msg)
+        except Exception:
+            await asyncio.sleep(1)
+
+
+def _handle_phonehome(msg: dict):
+    """Process a phone-home message from a rig."""
+    hostname = msg.get("hostname", "unknown")
+    for iface in msg.get("interfaces", []):
+        mac = iface.get("mac", "").lower()
+        ip = iface.get("ip", "")
+        if mac and ip:
+            _discovered_rigs[mac] = {
+                "ip": ip,
+                "hostname": hostname,
+                "mac": mac,
+                "interface": iface.get("name", ""),
+                "last_seen": time.time(),
+            }
+            log.info("Phone-home: %s (%s) at %s", hostname, mac, ip)
+
+    # Push discovery update to WebSocket clients
+    payload = json.dumps({
+        "type": "discovery",
+        "rigs": list(_discovered_rigs.values()),
+    })
+    for ws in list(_ws_clients):
+        try:
+            asyncio.create_task(ws.send_text(payload))
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _poll_task
     _poll_task = asyncio.create_task(poll_all_rigs())
+    _udp_task = asyncio.create_task(udp_listener())
     yield
     if _poll_task:
         _poll_task.cancel()
+    _udp_task.cancel()
 
 
 app = FastAPI(title="MeowFarm Dashboard", lifespan=lifespan)

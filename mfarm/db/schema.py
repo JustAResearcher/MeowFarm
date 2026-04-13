@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS oc_profiles (
     name                TEXT NOT NULL UNIQUE,
     core_offset         INTEGER,
     mem_offset          INTEGER,
+    core_lock           INTEGER,
+    mem_lock            INTEGER,
     power_limit         INTEGER,
     fan_speed           INTEGER,
     per_gpu_overrides   TEXT,

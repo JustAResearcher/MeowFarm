@@ -385,11 +385,19 @@ main { padding: 20px 24px; }
     </div>
     <div class="header-stat">
       <div class="value" id="total-hashrate">-</div>
-      <div class="label">Total Hashrate</div>
+      <div class="label">GPU Hashrate</div>
     </div>
     <div class="header-stat">
-      <div class="value" id="total-power">-</div>
-      <div class="label">Power Draw</div>
+      <div class="value" id="total-cpu-hashrate">-</div>
+      <div class="label">CPU Hashrate</div>
+    </div>
+    <div class="header-stat">
+      <div class="value" id="total-gpu-power">-</div>
+      <div class="label">GPU Power</div>
+    </div>
+    <div class="header-stat">
+      <div class="value" id="total-cpu-power">-</div>
+      <div class="label">CPU Power</div>
     </div>
     <div class="header-stat">
       <div class="value" id="total-accepted">-</div>
@@ -413,16 +421,60 @@ main { padding: 20px 24px; }
       <div class="icon">&#9881;</div>
       <p>No rigs configured. Add one to get started.</p>
     </div>
+    <div id="discovered-section" style="display:none;margin-top:24px">
+      <h3 style="color:var(--cyan);margin-bottom:12px">New Rigs Detected (phone-home)</h3>
+      <div id="discovered-list"></div>
+    </div>
   </div>
 
   <!-- Flight Sheets Tab -->
   <div class="tab-content" id="tab-flightsheets">
     <div id="fs-list"></div>
+    <details style="margin-top:20px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px">
+      <summary style="cursor:pointer;font-weight:600;color:var(--cyan)">+ Create Flight Sheet</summary>
+      <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:700px">
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Name</label><input id="fs-name" placeholder="luckypepe-solo" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Coin</label><input id="fs-coin" placeholder="LKPEPE" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Algorithm</label><input id="fs-algo" placeholder="yescryptR32" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Miner</label><select id="fs-miner" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"><option>ccminer</option><option>cpuminer-opt</option><option>trex</option><option>lolminer</option><option>xmrig</option></select></div>
+        <div style="grid-column:1/-1"><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Pool URL</label><input id="fs-pool" placeholder="stratum+tcp://pool:3333 or http://node:9778" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div style="grid-column:1/-1"><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Wallet</label><input id="fs-wallet" placeholder="Wallet address" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Password</label><input id="fs-pass" value="x" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Extra Args</label><input id="fs-extra" placeholder="--no-longpoll --segwit" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:flex;align-items:center;gap:8px;color:var(--text-dim);font-size:13px;margin-top:20px"><input type="checkbox" id="fs-solo"> Solo Mining (GBT)</label></div>
+        <div></div>
+        <div id="fs-solo-fields" style="grid-column:1/-1;display:none;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">RPC User</label><input id="fs-rpc-user" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+          <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">RPC Pass</label><input id="fs-rpc-pass" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+          <div style="grid-column:1/-1"><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Coinbase Address</label><input id="fs-coinbase" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        </div>
+        <div style="grid-column:1/-1;margin-top:8px">
+          <button class="btn success" onclick="createFS()">Create Flight Sheet</button>
+          <span id="fs-create-result" style="margin-left:12px;font-size:13px"></span>
+        </div>
+      </div>
+    </details>
   </div>
 
   <!-- OC Tab -->
   <div class="tab-content" id="tab-oc">
     <div id="oc-list"></div>
+    <details style="margin-top:20px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px">
+      <summary style="cursor:pointer;font-weight:600;color:var(--cyan)">+ Create OC Profile</summary>
+      <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:700px">
+        <div style="grid-column:1/-1"><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Profile Name</label><input id="oc-name" placeholder="4070ti-mining" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Core Offset (MHz)</label><input id="oc-core" type="number" placeholder="+100" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Mem Offset (MHz)</label><input id="oc-mem" type="number" placeholder="+2000" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Core Lock (MHz)</label><input id="oc-core-lock" type="number" placeholder="2600" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Mem Lock (MHz)</label><input id="oc-mem-lock" type="number" placeholder="e.g. 12251" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Power Limit (W)</label><input id="oc-pl" type="number" placeholder="200" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Fan Speed (%)</label><input id="oc-fan" type="number" placeholder="auto" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
+        <div style="grid-column:1/-1;margin-top:8px">
+          <button class="btn success" onclick="createOC()">Create OC Profile</button>
+          <span id="oc-create-result" style="margin-left:12px;font-size:13px"></span>
+        </div>
+      </div>
+    </details>
   </div>
 
   <!-- Add Rig Tab -->
@@ -436,6 +488,14 @@ main { padding: 20px 24px; }
       <div style="margin-bottom:12px">
         <label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Host / IP</label>
         <input id="add-host" type="text" placeholder="192.168.68.xxx" style="width:100%;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px">
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Or find by MAC Address</label>
+        <div style="display:flex;gap:8px">
+          <input id="add-mac" type="text" placeholder="f4:b5:20:02:56:45" style="flex:1;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px">
+          <button class="btn" onclick="findByMac()">Scan</button>
+        </div>
+        <div id="mac-result" style="margin-top:6px;font-size:13px"></div>
       </div>
       <div style="display:flex;gap:12px;margin-bottom:12px">
         <div style="flex:1">
@@ -479,6 +539,9 @@ function connect() {
       msg.rigs.forEach(r => rigData[r.name] = r);
       renderDashboard(msg.rigs);
     }
+    if (msg.type === 'discovery') {
+      renderDiscovered(msg.rigs);
+    }
   };
 
   ws.onclose = () => setTimeout(connect, 3000);
@@ -497,20 +560,24 @@ function renderDashboard(rigs) {
   noRigs.style.display = 'none';
 
   // Totals
-  let online = 0, totalHr = 0, totalPwr = 0, totalAcc = 0;
+  let online = 0, totalHr = 0, totalCpuHr = 0, totalGpuPwr = 0, totalCpuPwr = 0, totalAcc = 0;
   rigs.forEach(r => {
     if (r.online && r.stats) {
       online++;
       const m = r.stats.miner || {};
       totalHr += m.hashrate || 0;
       totalAcc += m.accepted || 0;
-      (r.stats.gpus || []).forEach(g => totalPwr += g.power_draw || 0);
+      (r.stats.gpus || []).forEach(g => totalGpuPwr += g.power_draw || 0);
+      totalCpuPwr += (r.stats.cpu || {}).power_draw || 0;
+      totalCpuHr += (r.stats.cpu_miner || {}).hashrate || 0;
     }
   });
 
   document.getElementById('total-rigs').textContent = `${online}/${rigs.length}`;
   document.getElementById('total-hashrate').textContent = fmtHash(totalHr);
-  document.getElementById('total-power').textContent = totalPwr ? `${totalPwr.toFixed(0)}W` : '-';
+  document.getElementById('total-cpu-hashrate').textContent = fmtHash(totalCpuHr);
+  document.getElementById('total-gpu-power').textContent = totalGpuPwr ? `${totalGpuPwr.toFixed(0)}W` : '-';
+  document.getElementById('total-cpu-power').textContent = totalCpuPwr ? `${totalCpuPwr.toFixed(0)}W` : '-';
   document.getElementById('total-accepted').textContent = totalAcc || '-';
 
   grid.innerHTML = rigs.map(r => rigCard(r)).join('');
@@ -557,6 +624,8 @@ function rigCard(r) {
         <div class="card-row"><span class="label">Power</span><span class="value">${pwr ? pwr.toFixed(0) + 'W' : '-'}</span></div>
         <div class="card-row"><span class="label">Temps</span><span class="value"><span class="gpu-temps">${temps || '-'}</span></span></div>
         <div class="card-row"><span class="label">Shares</span><span class="value">${acc}/${rej}</span></div>
+        <div class="card-row"><span class="label">GPU Ping</span><span class="value" style="${(s.gpu_pool_ping_ms||0) > 100 ? 'color:var(--red)' : (s.gpu_pool_ping_ms||0) > 50 ? 'color:var(--yellow)' : 'color:var(--green)'}">${s.gpu_pool_ping_ms != null ? s.gpu_pool_ping_ms + ' ms' : '-'}</span></div>
+        <div class="card-row"><span class="label">CPU Ping</span><span class="value" style="${(s.cpu_pool_ping_ms||0) > 100 ? 'color:var(--red)' : (s.cpu_pool_ping_ms||0) > 50 ? 'color:var(--yellow)' : 'color:var(--green)'}">${s.cpu_pool_ping_ms != null ? s.cpu_pool_ping_ms + ' ms' : '-'}</span></div>
         <div class="card-row"><span class="label">Uptime</span><span class="value">${uptime}</span></div>
       </div>
       <div class="card-footer">
@@ -584,11 +653,16 @@ function openRig(name) {
   html += `<div class="detail-section">
     <h3>Info</h3>
     <div class="card-row"><span class="label">OS</span><span class="value">${r.os_info || 'unknown'}</span></div>
-    <div class="card-row"><span class="label">CPU</span><span class="value">${r.cpu_model || cpu.model || 'unknown'}</span></div>
+    <div class="card-row"><span class="label">CPU</span><span class="value">${r.cpu_model || cpu.model || 'unknown'}${cpu.sockets > 1 ? ' x' + cpu.sockets : ''}</span></div>
+    <div class="card-row"><span class="label">CPU Config</span><span class="value">${cpu.cores ? cpu.cores + ' cores / ' + (cpu.threads || '') + ' threads' : '-'}</span></div>
     <div class="card-row"><span class="label">Agent</span><span class="value">${r.agent_version || s.agent_version || '-'}</span></div>
     <div class="card-row"><span class="label">Flight Sheet</span><span class="value">${r.flight_sheet || '-'}</span></div>
     <div class="card-row"><span class="label">OC Profile</span><span class="value">${r.oc_profile || '-'}</span></div>
     <div class="card-row"><span class="label">Uptime</span><span class="value">${s.uptime_secs ? fmtUptime(s.uptime_secs) : '-'}</span></div>
+    <div class="card-row"><span class="label">CPU Temp</span><span class="value" style="${(cpu.temp||0) >= 80 ? 'color:var(--red)' : (cpu.temp||0) >= 65 ? 'color:var(--yellow)' : 'color:var(--green)'}">${cpu.temp ? cpu.temp + 'C' : '-'}</span></div>
+    <div class="card-row"><span class="label">CPU Freq</span><span class="value">${cpu.freq_mhz ? cpu.freq_mhz + ' MHz' : '-'}</span></div>
+    <div class="card-row"><span class="label">CPU Power</span><span class="value">${cpu.power_draw != null ? cpu.power_draw.toFixed(1) + 'W' : '-'}</span></div>
+    <div class="card-row"><span class="label">CPU Usage</span><span class="value">${cpu.usage_pct != null ? cpu.usage_pct + '%' : '-'}</span></div>
     <div class="card-row"><span class="label">Load</span><span class="value">${sys.load_1m ?? '-'}</span></div>
     <div class="card-row"><span class="label">RAM</span><span class="value">${sys.mem_used_mb && sys.mem_total_mb ? `${sys.mem_used_mb}/${sys.mem_total_mb} MB` : '-'}</span></div>
   </div>`;
@@ -598,13 +672,15 @@ function openRig(name) {
     html += `<div class="detail-section">
       <h3>GPUs (${gpus.length})</h3>
       <table class="gpu-table">
-        <tr><th>GPU</th><th>Name</th><th>Temp</th><th>Fan</th><th>Core</th><th>Mem</th><th>Power</th><th>Hashrate</th></tr>
+        <tr><th>GPU</th><th>Name</th><th>Core</th><th>Mem</th><th>Fan</th><th>Core Clk</th><th>Mem Clk</th><th>Power</th><th>Hashrate</th></tr>
         ${gpus.map(g => {
           const tc = (g.temp || 0) >= 80 ? 'color:var(--red)' : (g.temp || 0) >= 65 ? 'color:var(--yellow)' : 'color:var(--green)';
+          const mc = (g.mem_temp || 0) >= 100 ? 'color:var(--red)' : (g.mem_temp || 0) >= 85 ? 'color:var(--yellow)' : 'color:var(--green)';
           return `<tr>
             <td>${g.index ?? '?'}</td>
             <td>${g.name || 'Unknown'}</td>
             <td style="${tc};font-weight:600">${g.temp != null ? g.temp + 'C' : '-'}</td>
+            <td style="${mc};font-weight:600">${g.mem_temp != null ? g.mem_temp + 'C' : '-'}</td>
             <td>${g.fan != null ? g.fan + '%' : '-'}</td>
             <td>${g.core_clock || '-'}</td>
             <td>${g.mem_clock || '-'}</td>
@@ -636,6 +712,9 @@ function openRig(name) {
       <button class="btn" onclick="rigAction('${name}','stop-miner')">Stop Miner</button>
       <button class="btn danger" onclick="rigAction('${name}','reboot')">Reboot Rig</button>
       <button class="btn" onclick="rigExec('${name}')">Run Command</button>
+      <button class="btn" onclick="viewMinerLog('${name}','gpu')">GPU Miner Log</button>
+      <button class="btn" onclick="viewMinerLog('${name}','cpu')">CPU Miner Log</button>
+      <button class="btn danger" onclick="deleteRig('${name}')">Remove Rig</button>
     </div>
     <div class="terminal" id="term-${name}" style="display:none"></div>
   </div>`;
@@ -678,6 +757,107 @@ async function rigExec(name) {
   }
 }
 
+let consoleInterval = null;
+
+function viewMinerLog(name, type) {
+  // Close the rig detail modal
+  closeModal();
+
+  // Open the console modal
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay active';
+  overlay.id = 'console-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) closeConsole(); };
+
+  const label = type === 'cpu' ? 'XMRig CPU' : 'CCMiner GPU';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:1000px">
+      <div class="modal-header">
+        <h2>${name} - ${label} Console</h2>
+        <button class="modal-close" onclick="closeConsole()">&times;</button>
+      </div>
+      <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">
+        ${type === 'cpu' ? `
+          <button class="btn" onclick="minerCmd('${name}','${type}','summary')">Summary</button>
+          <button class="btn" onclick="minerCmd('${name}','${type}','hashrate')">Hashrate</button>
+        ` : `
+          <button class="btn" onclick="minerCmd('${name}','${type}','summary')">Summary</button>
+          <button class="btn" onclick="minerCmd('${name}','${type}','threads')">Threads</button>
+          <button class="btn" onclick="minerCmd('${name}','${type}','pool')">Pool</button>
+        `}
+        <button class="btn" onclick="refreshConsole('${name}','${type}')">Refresh</button>
+        <label style="display:flex;align-items:center;gap:4px;color:var(--text-dim);font-size:12px;margin-left:auto">
+          <input type="checkbox" id="console-auto" checked onchange="toggleAutoRefresh('${name}','${type}')"> Auto-refresh
+        </label>
+      </div>
+      <div id="console-output" class="terminal" style="height:500px;max-height:70vh;margin:0;border-radius:0 0 12px 12px;font-size:12px;line-height:1.4;overflow-y:auto">Loading...</div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  refreshConsole(name, type);
+  consoleInterval = setInterval(() => refreshConsole(name, type), 2000);
+}
+
+function closeConsole() {
+  if (consoleInterval) { clearInterval(consoleInterval); consoleInterval = null; }
+  const overlay = document.getElementById('console-overlay');
+  if (overlay) overlay.remove();
+}
+
+async function refreshConsole(name, type) {
+  try {
+    const res = await fetch(`/api/rigs/${name}/miner-log/${type}?lines=80`);
+    const data = await res.json();
+    const el = document.getElementById('console-output');
+    if (el) {
+      el.textContent = data.log || 'No log output';
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch(e) {}
+}
+
+function toggleAutoRefresh(name, type) {
+  const checked = document.getElementById('console-auto').checked;
+  if (checked) {
+    if (!consoleInterval) consoleInterval = setInterval(() => refreshConsole(name, type), 2000);
+  } else {
+    if (consoleInterval) { clearInterval(consoleInterval); consoleInterval = null; }
+  }
+}
+
+async function minerCmd(name, type, command) {
+  const el = document.getElementById('console-output');
+  if (!el) return;
+  el.textContent += `\n\n>>> ${command.toUpperCase()} <<<\nQuerying...\n`;
+  el.scrollTop = el.scrollHeight;
+  try {
+    const res = await fetch(`/api/rigs/${name}/miner-api/${type}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ command }),
+    });
+    const data = await res.json();
+    if (data.raw) {
+      el.textContent += data.result;
+    } else {
+      el.textContent += JSON.stringify(data.result, null, 2);
+    }
+    el.scrollTop = el.scrollHeight;
+  } catch(e) {
+    el.textContent += `Error: ${e.message}`;
+  }
+}
+
+async function deleteRig(name) {
+  if (!confirm(`Remove rig "${name}" from MeowFarm?`)) return;
+  try {
+    await fetch(`/api/rigs/${name}`, { method: 'DELETE' });
+    closeModal();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
 async function addRig() {
   const name = document.getElementById('add-name').value.trim();
   const host = document.getElementById('add-host').value.trim();
@@ -707,6 +887,27 @@ async function addRig() {
   }
 }
 
+async function findByMac() {
+  const mac = document.getElementById('add-mac').value.trim();
+  const result = document.getElementById('mac-result');
+  if (!mac) { result.innerHTML = '<span style="color:var(--red)">Enter a MAC address</span>'; return; }
+  result.innerHTML = '<span style="color:var(--yellow)">Scanning subnet...</span>';
+  try {
+    const res = await fetch('/api/find-by-mac', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac }),
+    });
+    const data = await res.json();
+    if (data.ip) {
+      document.getElementById('add-host').value = data.ip;
+      result.innerHTML = `<span style="color:var(--green)">Found at ${data.ip}</span>`;
+    } else {
+      result.innerHTML = `<span style="color:var(--red)">MAC not found on network. Is the rig powered on?</span>`;
+    }
+  } catch(e) { result.innerHTML = `<span style="color:var(--red)">${e.message}</span>`; }
+}
+
 // ── Flight sheets tab ──
 
 async function loadFlightSheets() {
@@ -715,7 +916,7 @@ async function loadFlightSheets() {
   const div = document.getElementById('fs-list');
 
   if (!sheets.length) {
-    div.innerHTML = '<div class="empty-state"><div class="icon">&#128221;</div><p>No flight sheets. Create one via CLI:<br><code>mfarm flight create ...</code></p></div>';
+    div.innerHTML = '<div class="empty-state"><div class="icon">&#128221;</div><p>No flight sheets yet. Create one below.</p></div>';
     return;
   }
 
@@ -728,17 +929,58 @@ async function loadFlightSheets() {
       <td style="color:var(--green)">${fs.miner}</td>
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fs.pool_url}</td>
       <td>${fs.is_solo ? 'Yes' : ''}</td>
-      <td><button class="btn" onclick="applyFS('${fs.name}')">Apply to...</button></td>
+      <td style="display:flex;gap:6px"><button class="btn" onclick="applyFS('${fs.name}')">Apply</button><button class="btn danger" onclick="deleteFS('${fs.name}')">Delete</button></td>
     </tr>`).join('')}
   </table>`;
 }
 
 async function applyFS(fsName) {
-  const target = prompt(`Apply "${fsName}" to which rig? (rig name, group:name, or all)`);
+  const target = await pickTarget(`Apply "${fsName}" to:`);
   if (!target) return;
   const res = await fetch(`/api/flightsheets/${fsName}/apply/${target}`, { method: 'POST' });
   const data = await res.json();
   alert(JSON.stringify(data.results, null, 2));
+}
+
+async function deleteFS(name) {
+  if (!confirm(`Delete flight sheet "${name}"?`)) return;
+  await fetch(`/api/flightsheets/${name}`, { method: 'DELETE' });
+  loadFlightSheets();
+}
+
+async function createFS() {
+  const result = document.getElementById('fs-create-result');
+  const solo = document.getElementById('fs-solo').checked;
+  const body = {
+    name: document.getElementById('fs-name').value.trim(),
+    coin: document.getElementById('fs-coin').value.trim(),
+    algo: document.getElementById('fs-algo').value.trim(),
+    miner: document.getElementById('fs-miner').value,
+    pool_url: document.getElementById('fs-pool').value.trim(),
+    wallet: document.getElementById('fs-wallet').value.trim(),
+    password: document.getElementById('fs-pass').value.trim() || 'x',
+    extra_args: document.getElementById('fs-extra').value.trim(),
+    is_solo: solo,
+  };
+  if (solo) {
+    body.solo_rpc_user = document.getElementById('fs-rpc-user').value.trim();
+    body.solo_rpc_pass = document.getElementById('fs-rpc-pass').value.trim();
+    body.coinbase_addr = document.getElementById('fs-coinbase').value.trim();
+  }
+  if (!body.name || !body.coin || !body.pool_url || !body.wallet) {
+    result.innerHTML = '<span style="color:var(--red)">Name, coin, pool, and wallet are required</span>';
+    return;
+  }
+  try {
+    const res = await fetch('/api/flightsheets', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (res.ok) {
+      result.innerHTML = `<span style="color:var(--green)">Created "${body.name}"</span>`;
+      loadFlightSheets();
+    } else {
+      const err = await res.json();
+      result.innerHTML = `<span style="color:var(--red)">${err.detail}</span>`;
+    }
+  } catch(e) { result.innerHTML = `<span style="color:var(--red)">${e.message}</span>`; }
 }
 
 // ── OC tab ──
@@ -749,21 +991,67 @@ async function loadOcProfiles() {
   const div = document.getElementById('oc-list');
 
   if (!profiles.length) {
-    div.innerHTML = '<div class="empty-state"><div class="icon">&#9889;</div><p>No OC profiles. Create one via CLI:<br><code>mfarm oc create ...</code></p></div>';
+    div.innerHTML = '<div class="empty-state"><div class="icon">&#9889;</div><p>No OC profiles yet. Create one below.</p></div>';
     return;
   }
 
   div.innerHTML = `<table class="data-table">
-    <tr><th>Name</th><th>Core</th><th>Mem</th><th>Power Limit</th><th>Fan</th><th>Per-GPU</th></tr>
+    <tr><th>Name</th><th>Core Offset</th><th>Mem Offset</th><th>Core Lock</th><th>Mem Lock</th><th>Power</th><th>Fan</th><th>Actions</th></tr>
     ${profiles.map(p => `<tr>
       <td style="color:var(--cyan);font-weight:600">${p.name}</td>
       <td>${p.core_offset != null ? (p.core_offset > 0 ? '+' : '') + p.core_offset + ' MHz' : '-'}</td>
       <td>${p.mem_offset != null ? (p.mem_offset > 0 ? '+' : '') + p.mem_offset + ' MHz' : '-'}</td>
+      <td>${p.core_lock != null ? p.core_lock + ' MHz' : '-'}</td>
+      <td>${p.mem_lock != null ? p.mem_lock + ' MHz' : '-'}</td>
       <td>${p.power_limit != null ? p.power_limit + 'W' : '-'}</td>
       <td>${p.fan_speed != null ? p.fan_speed + '%' : 'auto'}</td>
-      <td>${p.per_gpu ? 'Yes' : ''}</td>
+      <td style="display:flex;gap:6px"><button class="btn" onclick="applyOC('${p.name}')">Apply</button><button class="btn danger" onclick="deleteOC('${p.name}')">Delete</button></td>
     </tr>`).join('')}
   </table>`;
+}
+
+async function createOC() {
+  const result = document.getElementById('oc-create-result');
+  const body = { name: document.getElementById('oc-name').value.trim() };
+  const core = document.getElementById('oc-core').value;
+  const mem = document.getElementById('oc-mem').value;
+  const coreLock = document.getElementById('oc-core-lock').value;
+  const memLock = document.getElementById('oc-mem-lock').value;
+  const pl = document.getElementById('oc-pl').value;
+  const fan = document.getElementById('oc-fan').value;
+  if (core) body.core_offset = parseInt(core);
+  if (mem) body.mem_offset = parseInt(mem);
+  if (coreLock) body.core_lock = parseInt(coreLock);
+  if (memLock) body.mem_lock = parseInt(memLock);
+  if (pl) body.power_limit = parseInt(pl);
+  if (fan) body.fan_speed = parseInt(fan);
+  if (!body.name) { result.innerHTML = '<span style="color:var(--red)">Name is required</span>'; return; }
+  try {
+    const res = await fetch('/api/oc-profiles', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (res.ok) {
+      result.innerHTML = `<span style="color:var(--green)">Created "${body.name}"</span>`;
+      loadOcProfiles();
+    } else {
+      const err = await res.json();
+      result.innerHTML = `<span style="color:var(--red)">${err.detail}</span>`;
+    }
+  } catch(e) { result.innerHTML = `<span style="color:var(--red)">${e.message}</span>`; }
+}
+
+async function applyOC(name) {
+  const target = await pickTarget(`Apply OC "${name}" to:`);
+  if (!target) return;
+  try {
+    const res = await fetch(`/api/oc-profiles/${name}/apply/${target}`, { method: 'POST' });
+    const data = await res.json();
+    alert(JSON.stringify(data.results, null, 2));
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteOC(name) {
+  if (!confirm(`Delete OC profile "${name}"?`)) return;
+  await fetch(`/api/oc-profiles/${name}`, { method: 'DELETE' });
+  loadOcProfiles();
 }
 
 // ── Tabs ──
@@ -797,6 +1085,85 @@ function fmtUptime(secs) {
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 }
+
+// ── Discovered rigs (phone-home) ──
+
+function renderDiscovered(rigs) {
+  const section = document.getElementById('discovered-section');
+  const list = document.getElementById('discovered-list');
+  const newRigs = rigs.filter(r => !r.already_added);
+  if (!newRigs.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  list.innerHTML = `<table class="data-table">
+    <tr><th>Hostname</th><th>IP</th><th>MAC</th><th>Interface</th><th>Seen</th><th>Action</th></tr>
+    ${newRigs.map(r => `<tr>
+      <td style="color:var(--cyan);font-weight:600">${r.hostname}</td>
+      <td>${r.ip}</td>
+      <td style="font-family:monospace">${r.mac}</td>
+      <td>${r.interface}</td>
+      <td>${r.age_secs < 60 ? r.age_secs + 's ago' : Math.round(r.age_secs/60) + 'm ago'}</td>
+      <td><button class="btn success" onclick="quickAddRig('${r.ip}','${r.hostname}')">+ Add</button></td>
+    </tr>`).join('')}
+  </table>`;
+}
+
+async function quickAddRig(ip, hostname) {
+  const name = prompt('Rig name:', hostname);
+  if (!name) return;
+  try {
+    const res = await fetch('/api/rigs', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, host: ip, ssh_port: 22, ssh_user: 'root' }),
+    });
+    if (res.ok) { alert(`Added ${name} (${ip})`); }
+    else { const err = await res.json(); alert(err.detail); }
+  } catch(e) { alert(e.message); }
+}
+
+// Periodically fetch discovered rigs
+setInterval(async () => {
+  try {
+    const res = await fetch('/api/discovered');
+    const rigs = await res.json();
+    renderDiscovered(rigs);
+  } catch(e) {}
+}, 15000);
+
+// ── Target picker (dropdown instead of prompt) ──
+
+function pickTarget(title) {
+  return new Promise(resolve => {
+    const rigs = Object.keys(rigData);
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:300;display:flex;justify-content:center;align-items:center';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;min-width:320px';
+    box.innerHTML = `<h3 style="margin-bottom:16px;font-size:15px">${title}</h3>
+      <select id="pick-target" style="width:100%;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;margin-bottom:16px">
+        <option value="all">All Rigs</option>
+        ${rigs.map(n => `<option value="${n}">${n} (${rigData[n].host})</option>`).join('')}
+      </select>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn" id="pick-cancel">Cancel</button>
+        <button class="btn success" id="pick-ok">Apply</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); }});
+    box.querySelector('#pick-cancel').onclick = () => { document.body.removeChild(overlay); resolve(null); };
+    box.querySelector('#pick-ok').onclick = () => {
+      const val = box.querySelector('#pick-target').value;
+      document.body.removeChild(overlay);
+      resolve(val);
+    };
+  });
+}
+
+// Solo checkbox toggle
+document.getElementById('fs-solo').addEventListener('change', e => {
+  document.getElementById('fs-solo-fields').style.display = e.target.checked ? 'grid' : 'none';
+});
 
 // Keyboard shortcut
 document.addEventListener('keydown', e => {

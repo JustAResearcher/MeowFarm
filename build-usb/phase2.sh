@@ -145,6 +145,9 @@ SYSCTL
 
 systemctl enable systemd-networkd
 
+# Brand as MeowOS
+sed -i 's/PRETTY_NAME=.*/PRETTY_NAME="MeowOS 1.0"/' /etc/os-release
+
 echo "CHROOT_SETUP_DONE"
 SETUP
 

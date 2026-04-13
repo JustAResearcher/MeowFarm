@@ -89,7 +89,7 @@ class Config:
 def get_nvidia_stats() -> list[dict]:
     """Query nvidia-smi for GPU stats."""
     try:
-        fields = "index,name,temperature.gpu,fan.speed,power.draw,power.limit," \
+        fields = "index,name,temperature.gpu,temperature.memory,fan.speed,power.draw,power.limit," \
                  "clocks.current.graphics,clocks.current.memory," \
                  "memory.used,memory.total,utilization.gpu,pci.bus_id"
         result = subprocess.run(
@@ -104,22 +104,23 @@ def get_nvidia_stats() -> list[dict]:
             if not line.strip():
                 continue
             parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 12:
+            if len(parts) < 13:
                 continue
             try:
                 gpus.append({
                     "index": int(parts[0]),
                     "name": parts[1],
                     "temp": _int_or_none(parts[2]),
-                    "fan": _int_or_none(parts[3]),
-                    "power_draw": _float_or_none(parts[4]),
-                    "power_limit": _float_or_none(parts[5]),
-                    "core_clock": _int_or_none(parts[6]),
-                    "mem_clock": _int_or_none(parts[7]),
-                    "mem_used": _int_or_none(parts[8]),
-                    "mem_total": _int_or_none(parts[9]),
-                    "utilization": _int_or_none(parts[10]),
-                    "pci_bus": parts[11],
+                    "mem_temp": _int_or_none(parts[3]),
+                    "fan": _int_or_none(parts[4]),
+                    "power_draw": _float_or_none(parts[5]),
+                    "power_limit": _float_or_none(parts[6]),
+                    "core_clock": _int_or_none(parts[7]),
+                    "mem_clock": _int_or_none(parts[8]),
+                    "mem_used": _int_or_none(parts[9]),
+                    "mem_total": _int_or_none(parts[10]),
+                    "utilization": _int_or_none(parts[11]),
+                    "pci_bus": parts[12],
                 })
             except (ValueError, IndexError):
                 continue
@@ -185,37 +186,53 @@ def get_amd_stats() -> list[dict]:
 
 def get_cpu_stats() -> dict:
     """Get CPU model, temp, and usage."""
-    info = {"cores": os.cpu_count()}
+    info = {"threads": os.cpu_count()}
 
-    # Model name
+    # Count physical cores, sockets, and get model
     try:
+        sockets = set()
+        cores = set()
         with open("/proc/cpuinfo") as f:
+            cur_phys = None
+            cur_core = None
             for line in f:
-                if "model name" in line:
+                if "model name" in line and "model" not in info:
                     info["model"] = line.split(":", 1)[1].strip()
-                    break
+                if "physical id" in line:
+                    cur_phys = line.split(":", 1)[1].strip()
+                    sockets.add(cur_phys)
+                if "core id" in line:
+                    cur_core = line.split(":", 1)[1].strip()
+                    if cur_phys is not None:
+                        cores.add((cur_phys, cur_core))
+        info["sockets"] = len(sockets) if sockets else 1
+        info["cores"] = len(cores) if cores else os.cpu_count()
     except OSError:
-        pass
+        info["cores"] = os.cpu_count()
+        info["sockets"] = 1
 
-    # Temperature via sensors
+    # Temperature via sensors (only CPU chips: k10temp, coretemp, zenpower)
     try:
         result = subprocess.run(
             ["sensors", "-j"], capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0:
             data = json.loads(result.stdout)
-            for chip_data in data.values():
+            cpu_chips = ["k10temp", "coretemp", "zenpower"]
+            for chip_name, chip_data in data.items():
+                if not any(c in chip_name.lower() for c in cpu_chips):
+                    continue
                 if isinstance(chip_data, dict):
+                    # Look for Tctl (AMD) or Package temp (Intel)
                     for key, val in chip_data.items():
-                        if "temp" in key.lower() and isinstance(val, dict):
+                        if isinstance(val, dict):
                             for k2, v2 in val.items():
                                 if "input" in k2 and isinstance(v2, (int, float)):
-                                    info["temp"] = round(v2)
+                                    # Take the highest CPU temp across sockets
+                                    t = round(v2)
+                                    if "temp" not in info or t > info["temp"]:
+                                        info["temp"] = t
                                     break
-                            if "temp" in info:
-                                break
-                if "temp" in info:
-                    break
     except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
         pass
 
@@ -245,6 +262,25 @@ def get_cpu_stats() -> dict:
                 if "cpu MHz" in line:
                     info["freq_mhz"] = round(float(line.split(":", 1)[1].strip()))
                     break
+    except (OSError, ValueError):
+        pass
+
+    # CPU power draw (RAPL - sum all sockets)
+    try:
+        import glob
+        rapl_paths = sorted(glob.glob("/sys/class/powercap/intel-rapl:*/energy_uj"))
+        if rapl_paths:
+            e1_all = []
+            for p in rapl_paths:
+                with open(p) as f:
+                    e1_all.append((p, int(f.read().strip())))
+            time.sleep(0.1)
+            total_watts = 0.0
+            for p, e1 in e1_all:
+                with open(p) as f:
+                    e2 = int(f.read().strip())
+                total_watts += (e2 - e1) / 100000  # microjoules over 0.1s -> watts
+            info["power_draw"] = round(total_watts, 1)
     except (OSError, ValueError):
         pass
 
@@ -427,7 +463,8 @@ def query_xmrig_api(port: int) -> dict | None:
     """Query XMRig via HTTP API."""
     try:
         conn = HTTPConnection("127.0.0.1", port, timeout=3)
-        conn.request("GET", "/1/summary")
+        headers = {"Authorization": "Bearer meowfarm"}
+        conn.request("GET", "/1/summary", headers=headers)
         resp = conn.getresponse()
         if resp.status != 200:
             return None
@@ -899,15 +936,42 @@ class Agent:
                 "running": False,
             }
 
+        # Ping GPU pool/node
+        gpu_pool_ping = None
+        if self.config.flight_sheet:
+            pool_url = self.config.flight_sheet.get("pool_url", "")
+            gpu_pool_ping = _ping_host(pool_url)
+
+        # XMRig CPU miner stats (runs independently via systemd)
+        cpu_miner_stats = {}
+        cpu_pool_ping = None
+        try:
+            xmrig_data = query_xmrig_api(self.config.api_ports.get("xmrig", 44445))
+            if xmrig_data:
+                cpu_miner_stats = xmrig_data
+                cpu_miner_stats["running"] = True
+                # Ping CPU pool
+                xmrig_config_path = Path("/opt/mfarm/miners/xmrig-config.json")
+                if xmrig_config_path.exists():
+                    xmrig_cfg = json.loads(xmrig_config_path.read_text())
+                    pools = xmrig_cfg.get("pools", [])
+                    if pools:
+                        cpu_pool_ping = _ping_host(pools[0].get("url", ""))
+        except Exception:
+            pass
+
         stats = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_version": VERSION,
             "hostname": hostname,
             "uptime_secs": uptime_secs,
             "miner": miner_stats,
+            "cpu_miner": cpu_miner_stats,
             "gpus": gpus,
             "cpu": get_cpu_stats(),
             "system": get_system_stats(),
+            "gpu_pool_ping_ms": gpu_pool_ping,
+            "cpu_pool_ping_ms": cpu_pool_ping,
         }
 
         # Atomic write
@@ -956,6 +1020,26 @@ class Agent:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
+
+def _ping_host(url: str) -> float | None:
+    """Extract hostname from a URL and ping it. Returns ms or None."""
+    import re as _re
+    m = _re.search(r'://([^:/]+)', url) or _re.search(r'^([^:/]+)', url)
+    if not m:
+        return None
+    host = m.group(1)
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", "2", host],
+            capture_output=True, text=True, timeout=5,
+        )
+        pm = _re.search(r'time[=<]([\d.]+)', result.stdout)
+        if pm:
+            return round(float(pm.group(1)), 1)
+    except Exception:
+        pass
+    return None
+
 
 def _int_or_none(s: str) -> int | None:
     try:
