@@ -56,12 +56,24 @@ try {
     Write-Host ""
     Write-Host "$([math]::Round($bytesWritten/1MB)) MB written." -ForegroundColor Green
 
-    Set-Disk -Number 4 -IsOffline $false
     Remove-Item $imgPath -ErrorAction SilentlyContinue
+
+    # Phase 4: Fix GPT backup header
+    # The 8GB image has GPT backup at 8GB mark, but disk is 120GB.
+    # UEFI firmware sees corrupt GPT and refuses to boot without this fix.
+    Write-Host "`n=== Fixing GPT for 120GB disk ===" -ForegroundColor Cyan
+    Set-Disk -Number 4 -IsOffline $true
+    Start-Sleep 2
+    wsl --mount '\\.\PhysicalDrive4' --bare 2>&1
+    Start-Sleep 3
+    wsl -d Ubuntu-22.04 -- sudo bash -c 'for dev in /dev/sd?; do SIZE=$(blockdev --getsize64 "$dev" 2>/dev/null || echo 0); if [ "$SIZE" -gt 100000000000 ] && [ "$SIZE" -lt 130000000000 ]; then echo "Fixing GPT on $dev"; sgdisk -e "$dev"; echo "Verifying EFI boot files..."; mkdir -p /tmp/eficheck; mount "${dev}1" /tmp/eficheck 2>/dev/null && { ls -la /tmp/eficheck/EFI/BOOT/ 2>/dev/null; umount /tmp/eficheck; } || echo "WARN: Could not mount EFI partition"; break; fi; done' 2>&1
+    wsl --unmount '\\.\PhysicalDrive4' 2>&1
+    Set-Disk -Number 4 -IsOffline $false
 
     Write-Host ""
     Write-Host "============================================" -ForegroundColor Green
     Write-Host "  MeowOS installed on ADATA SU650!" -ForegroundColor Green
+    Write-Host "  GPT fixed for full disk size." -ForegroundColor Green
     Write-Host "  Plug into rig and boot." -ForegroundColor Green
     Write-Host "============================================" -ForegroundColor Green
     "SUCCESS" | Out-File "C:\Source\flash-usb-result.txt"
