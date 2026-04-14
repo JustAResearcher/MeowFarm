@@ -45,10 +45,16 @@ sgdisk -p "$IMG"
 # Calculate offsets
 # EFI: sector 2048, 1048576 sectors of 512 bytes = 512MB
 # Root: sector 1050624 to end
-EFI_OFFSET=$((2048 * 512))
-EFI_SIZE=$((1048576 * 512))
-ROOT_OFFSET=$((1050624 * 512))
-ROOT_SIZE=$((6144 * 1048576 - ROOT_OFFSET))
+# Get exact partition boundaries from sgdisk (no manual math)
+EFI_START=$(sgdisk -i 1 "$IMG" 2>/dev/null | grep "First sector" | awk '{print $3}')
+EFI_END=$(sgdisk -i 1 "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
+ROOT_START=$(sgdisk -i 2 "$IMG" 2>/dev/null | grep "First sector" | awk '{print $3}')
+ROOT_END=$(sgdisk -i 2 "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
+
+EFI_OFFSET=$((EFI_START * 512))
+EFI_SIZE=$(( (EFI_END - EFI_START + 1) * 512 ))
+ROOT_OFFSET=$((ROOT_START * 512))
+ROOT_SIZE=$(( (ROOT_END - ROOT_START + 1) * 512 ))
 
 echo "  EFI:  offset=$EFI_OFFSET sizelimit=$EFI_SIZE"
 echo "  Root: offset=$ROOT_OFFSET sizelimit=$ROOT_SIZE"
