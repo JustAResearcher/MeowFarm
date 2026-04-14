@@ -23,13 +23,12 @@ jobs:
         env:
           MEOWOS_SRC: ${{ github.workspace }}
           MEOWOS_OUTPUT: /tmp/meowos.img
-        run: sudo -E bash build-usb/wsl-build-image.sh
-
-      - name: Compress image
         run: |
+          sudo -E bash build-usb/wsl-build-image.sh
           VERSION=$(cat VERSION | tr -d '\n')
-          xz -9 -T0 /tmp/meowos.img
-          mv /tmp/meowos.img.xz meowos-v${VERSION}.img.xz
+          sudo xz -9 -T0 /tmp/meowos.img
+          sudo mv /tmp/meowos.img.xz meowos-v${VERSION}.img.xz
+          sudo chown $(id -u):$(id -g) meowos-v${VERSION}.img.xz
 
       - name: Generate checksums
         run: sha256sum meowos-*.img.xz > SHA256SUMS.txt
