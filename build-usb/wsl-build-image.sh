@@ -32,7 +32,7 @@ which debootstrap >/dev/null 2>&1 || {
 
 # [1/7] Create 8GB image
 echo "[1/7] Creating 8GB disk image..."
-dd if=/dev/zero of="$IMG" bs=1M count=4096 status=progress
+dd if=/dev/zero of="$IMG" bs=1M count=6144 status=progress
 echo "  Image: $(ls -lh $IMG | awk '{print $5}')"
 
 # [2/7] Partition
@@ -48,7 +48,7 @@ sgdisk -p "$IMG"
 EFI_OFFSET=$((2048 * 512))
 EFI_SIZE=$((1048576 * 512))
 ROOT_OFFSET=$((1050624 * 512))
-ROOT_SIZE=$((4096 * 1048576 - ROOT_OFFSET))
+ROOT_SIZE=$((6144 * 1048576 - ROOT_OFFSET))
 
 echo "  EFI:  offset=$EFI_OFFSET sizelimit=$EFI_SIZE"
 echo "  Root: offset=$ROOT_OFFSET sizelimit=$ROOT_SIZE"
@@ -408,8 +408,15 @@ sed -i "s/PRETTY_NAME=\"MeowOS\"/PRETTY_NAME=\"MeowOS v$VERSION\"/" "$MNT/etc/os
 echo "[6/7] Installing GRUB..."
 
 # Find the kernel and initrd that were installed
-KERNEL=$(ls "$MNT/boot/vmlinuz-"* 2>/dev/null | sort -V | tail -1 | xargs basename)
-INITRD=$(ls "$MNT/boot/initrd.img-"* 2>/dev/null | sort -V | tail -1 | xargs basename)
+KERNEL=$(ls "$MNT/boot/vmlinuz-"* 2>/dev/null | sort -V | tail -1 | xargs -r basename)
+INITRD=$(ls "$MNT/boot/initrd.img-"* 2>/dev/null | sort -V | tail -1 | xargs -r basename)
+# Fallback: generate initrd if missing
+if [ -z "$INITRD" ] && [ -n "$KERNEL" ]; then
+    KVER="${KERNEL#vmlinuz-}"
+    echo "  Generating initrd for $KVER..."
+    chroot "$MNT" update-initramfs -c -k "$KVER" 2>/dev/null || true
+    INITRD=$(ls "$MNT/boot/initrd.img-"* 2>/dev/null | sort -V | tail -1 | xargs -r basename)
+fi
 echo "  Kernel: $KERNEL"
 echo "  Initrd: $INITRD"
 
@@ -421,6 +428,7 @@ fi
 
 # Build GRUB EFI binary with ALL needed modules baked in
 echo "  Building GRUB EFI binary with embedded modules..."
+mkdir -p "$MNT/boot/efi/EFI/BOOT"
 chroot "$MNT" grub-mkimage \
     -o /boot/efi/EFI/BOOT/BOOTX64.EFI \
     -O x86_64-efi \
