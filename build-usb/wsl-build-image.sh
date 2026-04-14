@@ -426,17 +426,25 @@ if [ -z "$KERNEL" ]; then
     exit 1
 fi
 
-# Build GRUB EFI binary with ALL needed modules baked in
-echo "  Building GRUB EFI binary with embedded modules..."
+# Install GRUB with embedded config that finds the EFI partition
+echo "  Building GRUB..."
 mkdir -p "$MNT/boot/efi/EFI/BOOT"
+
+# Embed a tiny config that locates the EFI partition by searching for our kernel
+cat > "$MNT/tmp/grub-embed.cfg" <<EMBED
+search --no-floppy --file --set=root /$KERNEL
+set prefix=(\$root)/EFI/BOOT
+EMBED
+
 chroot "$MNT" grub-mkimage \
     -o /boot/efi/EFI/BOOT/BOOTX64.EFI \
     -O x86_64-efi \
+    -c /tmp/grub-embed.cfg \
     -p /EFI/BOOT \
     normal boot linux ext2 fat part_gpt part_msdos \
-    search search_fs_uuid search_label \
+    search search_fs_file search_fs_uuid search_label \
     configfile echo test ls cat \
-    gzio lvm
+    gzio lvm all_video
 
 # Copy kernel + initrd to EFI partition (FAT32 - always readable by GRUB)
 echo "  Copying kernel to EFI partition..."
