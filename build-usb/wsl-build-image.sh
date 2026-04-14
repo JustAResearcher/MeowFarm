@@ -183,9 +183,7 @@ ExecStart=-/sbin/agetty --autologin miner --noclear %I $TERM
 AUTOLOGIN
 
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-# Mask journal-flush (hangs on first boot) - use symlink directly since systemd isn't running in chroot
-ln -sf /dev/null /etc/systemd/system/systemd-journal-flush.service
-ln -sf /dev/null /etc/systemd/system/systemd-journal-flush.socket
+# journal-flush masked after chroot (see below)
 
 cat > /etc/rc.local <<'RC'
 #!/bin/bash
@@ -210,6 +208,11 @@ echo "CHROOT_SETUP_DONE"
 SETUP
 chmod +x "$MNT/tmp/setup.sh"
 chroot "$MNT" /tmp/setup.sh
+
+# Kill journal-flush AFTER all packages are installed (packages overwrite symlinks)
+ln -sf /dev/null "$MNT/etc/systemd/system/systemd-journal-flush.service"
+ln -sf /dev/null "$MNT/etc/systemd/system/systemd-journal-flush.socket"
+ln -sf /dev/null "$MNT/etc/systemd/system/systemd-journal-catalog-update.service"
 echo "[4/7] Done"
 
 # [5/7] MeowFarm agent + miners
