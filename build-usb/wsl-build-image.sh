@@ -183,7 +183,9 @@ ExecStart=-/sbin/agetty --autologin miner --noclear %I $TERM
 AUTOLOGIN
 
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-systemctl mask systemd-journal-flush.service
+# Mask journal-flush (hangs on first boot) - use symlink directly since systemd isn't running in chroot
+ln -sf /dev/null /etc/systemd/system/systemd-journal-flush.service
+ln -sf /dev/null /etc/systemd/system/systemd-journal-flush.socket
 
 cat > /etc/rc.local <<'RC'
 #!/bin/bash
