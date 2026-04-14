@@ -419,42 +419,61 @@ if [ -z "$KERNEL" ]; then
     exit 1
 fi
 
-# Install GRUB EFI binary (just copies files, no disk access needed)
-chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable 2>&1 || {
-    echo "grub-install failed, manually copying EFI binary..."
-    mkdir -p "$MNT/boot/efi/EFI/BOOT"
-    cp "$MNT/usr/lib/grub/x86_64-efi/monolithic/grubx64.efi" "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || \
-    cp "$MNT/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed" "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || {
-        # Build grub EFI binary from modules
-        chroot "$MNT" grub-mkimage -o /boot/efi/EFI/BOOT/BOOTX64.EFI -O x86_64-efi \
-            normal boot linux ext2 fat part_gpt search search_fs_uuid search_label
-    }
-}
+# Build GRUB EFI binary with ALL needed modules baked in
+echo "  Building GRUB EFI binary with embedded modules..."
+chroot "$MNT" grub-mkimage \
+    -o /boot/efi/EFI/BOOT/BOOTX64.EFI \
+    -O x86_64-efi \
+    -p /EFI/BOOT \
+    normal boot linux ext2 fat part_gpt part_msdos \
+    search search_fs_uuid search_label \
+    configfile echo test ls cat \
+    gzio lvm
 
-# Write grub.cfg MANUALLY (update-grub/grub-probe fails on loop devices)
-cat > "$MNT/boot/grub/grub.cfg" <<GRUBCFG
+# Copy kernel + initrd to EFI partition (FAT32 - always readable by GRUB)
+echo "  Copying kernel to EFI partition..."
+cp "$MNT/boot/$KERNEL" "$MNT/boot/efi/$KERNEL"
+cp "$MNT/boot/$INITRD" "$MNT/boot/efi/$INITRD"
+
+# Write grub.cfg to EFI partition (where -p /EFI/BOOT tells GRUB to look)
+mkdir -p "$MNT/boot/efi/EFI/BOOT"
+cat > "$MNT/boot/efi/EFI/BOOT/grub.cfg" <<GRUBCFG
 set default=0
 set timeout=3
 
 menuentry "MeowOS" {
+    linux /EFI/BOOT/../../../$KERNEL root=UUID=$ROOT_UUID ro quiet net.ifnames=0 biosdevname=0
+    initrd /EFI/BOOT/../../../$INITRD
+}
+
+menuentry "MeowOS (EFI fallback)" {
+    search --no-floppy --fs-uuid --set=root $EFI_UUID
+    linux /$KERNEL root=UUID=$ROOT_UUID ro quiet net.ifnames=0 biosdevname=0
+    initrd /$INITRD
+}
+
+menuentry "MeowOS (ext4 root)" {
     search --no-floppy --fs-uuid --set=root $ROOT_UUID
     linux /boot/$KERNEL root=UUID=$ROOT_UUID ro quiet net.ifnames=0 biosdevname=0
     initrd /boot/$INITRD
 }
 GRUBCFG
 
-# Also put grub.cfg on the EFI partition (some firmware looks there)
-mkdir -p "$MNT/boot/efi/EFI/BOOT"
-cp "$MNT/boot/grub/grub.cfg" "$MNT/boot/efi/EFI/BOOT/grub.cfg"
-mkdir -p "$MNT/boot/efi/boot/grub"
-cp "$MNT/boot/grub/grub.cfg" "$MNT/boot/efi/boot/grub/grub.cfg"
+# Also write to /boot/grub for completeness
+mkdir -p "$MNT/boot/grub"
+cp "$MNT/boot/efi/EFI/BOOT/grub.cfg" "$MNT/boot/grub/grub.cfg"
 
-# Verify EFI boot file exists
+# Verify
 if [ -f "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" ]; then
     echo "  EFI binary: OK ($(ls -lh "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" | awk '{print $5}'))"
 else
     echo "  FATAL: BOOTX64.EFI not found!"
-    find "$MNT/boot/efi" -type f
+    exit 1
+fi
+if [ -f "$MNT/boot/efi/$KERNEL" ]; then
+    echo "  Kernel on EFI: OK ($(ls -lh "$MNT/boot/efi/$KERNEL" | awk '{print $5}'))"
+else
+    echo "  FATAL: kernel not copied to EFI partition!"
     exit 1
 fi
 echo "  grub.cfg: root=UUID=$ROOT_UUID kernel=$KERNEL"
