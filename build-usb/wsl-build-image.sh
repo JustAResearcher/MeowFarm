@@ -426,61 +426,42 @@ if [ -z "$KERNEL" ]; then
     exit 1
 fi
 
-# Install GRUB with embedded config that finds the EFI partition
-echo "  Building GRUB..."
+# Use systemd-boot instead of GRUB (simpler, reads FAT32 only, no modules)
+echo "  Installing systemd-boot..."
 mkdir -p "$MNT/boot/efi/EFI/BOOT"
+mkdir -p "$MNT/boot/efi/loader/entries"
 
-# Embed a tiny config that locates the EFI partition by searching for our kernel
-cat > "$MNT/tmp/grub-embed.cfg" <<EMBED
-search --no-floppy --file --set=root /$KERNEL
-set prefix=(\$root)/EFI/BOOT
-EMBED
+# Copy systemd-boot EFI binary
+cp "$MNT/usr/lib/systemd/boot/efi/systemd-bootx64.efi" "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI"
 
-chroot "$MNT" grub-mkimage \
-    -o /boot/efi/EFI/BOOT/BOOTX64.EFI \
-    -O x86_64-efi \
-    -c /tmp/grub-embed.cfg \
-    -p /EFI/BOOT \
-    normal boot linux ext2 fat part_gpt part_msdos \
-    search search_fs_file search_fs_uuid search_label \
-    configfile echo test ls cat \
-    gzio lvm all_video
-
-# Copy kernel + initrd to EFI partition (FAT32 - always readable by GRUB)
+# Copy kernel + initrd to EFI partition
 echo "  Copying kernel to EFI partition..."
 cp "$MNT/boot/$KERNEL" "$MNT/boot/efi/$KERNEL"
 cp "$MNT/boot/$INITRD" "$MNT/boot/efi/$INITRD"
 
-# Write grub.cfg to EFI partition (where -p /EFI/BOOT tells GRUB to look)
-mkdir -p "$MNT/boot/efi/EFI/BOOT"
-cat > "$MNT/boot/efi/EFI/BOOT/grub.cfg" <<GRUBCFG
-set default=0
-set timeout=3
+# Loader config
+cat > "$MNT/boot/efi/loader/loader.conf" <<LOADER
+default meowos
+timeout 3
+LOADER
 
-menuentry "MeowOS" {
-    linux /$KERNEL root=UUID=$ROOT_UUID ro quiet net.ifnames=0 biosdevname=0
-    initrd /$INITRD
-}
-GRUBCFG
-
-# Also write to /boot/grub for completeness
-mkdir -p "$MNT/boot/grub"
-cp "$MNT/boot/efi/EFI/BOOT/grub.cfg" "$MNT/boot/grub/grub.cfg"
+# Boot entry
+cat > "$MNT/boot/efi/loader/entries/meowos.conf" <<ENTRY
+title   MeowOS
+linux   /$KERNEL
+initrd  /$INITRD
+options root=UUID=$ROOT_UUID ro quiet net.ifnames=0 biosdevname=0
+ENTRY
 
 # Verify
 if [ -f "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" ]; then
-    echo "  EFI binary: OK ($(ls -lh "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" | awk '{print $5}'))"
+    echo "  systemd-boot: OK ($(ls -lh "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" | awk '{print $5}'))"
 else
     echo "  FATAL: BOOTX64.EFI not found!"
     exit 1
 fi
-if [ -f "$MNT/boot/efi/$KERNEL" ]; then
-    echo "  Kernel on EFI: OK ($(ls -lh "$MNT/boot/efi/$KERNEL" | awk '{print $5}'))"
-else
-    echo "  FATAL: kernel not copied to EFI partition!"
-    exit 1
-fi
-echo "  grub.cfg: root=UUID=$ROOT_UUID kernel=$KERNEL"
+echo "  Kernel: $KERNEL"
+echo "  Root: UUID=$ROOT_UUID"
 echo "[6/7] Done"
 
 # [7/7] Finalize
