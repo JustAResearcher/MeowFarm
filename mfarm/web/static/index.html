@@ -370,6 +370,7 @@ main { padding: 20px 24px; }
   margin-top: 12px;
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -692,6 +693,12 @@ function openRig(name) {
     </div>`;
   }
 
+  // Hashrate history chart
+  html += `<div class="detail-section">
+    <h3>Hashrate (24h)</h3>
+    <div style="position:relative;height:200px;margin-top:8px"><canvas id="hr-chart"></canvas></div>
+  </div>`;
+
   // Miner section
   html += `<div class="detail-section">
     <h3>Miner</h3>
@@ -714,6 +721,7 @@ function openRig(name) {
       <button class="btn" onclick="rigExec('${name}')">Run Command</button>
       <button class="btn" onclick="viewMinerLog('${name}','gpu')">GPU Miner Log</button>
       <button class="btn" onclick="viewMinerLog('${name}','cpu')">CPU Miner Log</button>
+      <button class="btn" onclick="renameRig('${name}')">Rename</button>
       <button class="btn danger" onclick="deleteRig('${name}')">Remove Rig</button>
     </div>
     <div class="terminal" id="term-${name}" style="display:none"></div>
@@ -721,9 +729,56 @@ function openRig(name) {
 
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal').classList.add('active');
+
+  // Load hashrate history chart
+  loadHashrateChart(name);
+}
+
+let _hrChart = null;
+async function loadHashrateChart(rigName) {
+  const canvas = document.getElementById('hr-chart');
+  if (!canvas) return;
+  try {
+    const res = await fetch(`/api/rigs/${rigName}/history?hours=24`);
+    const data = await res.json();
+    if (_hrChart) { _hrChart.destroy(); _hrChart = null; }
+    if (!data.length) {
+      canvas.parentElement.innerHTML = '<p style="color:var(--text-dim);text-align:center;padding:40px 0">No history yet. Data accumulates every 60 seconds.</p>';
+      return;
+    }
+    const labels = data.map(d => {
+      const dt = new Date(d.t + 'Z');
+      return dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    });
+    const hrData = data.map(d => d.hr);
+    const pwData = data.map(d => d.power);
+    _hrChart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Hashrate (Sol/s)', data: hrData, borderColor: '#00d4aa', backgroundColor: 'rgba(0,212,170,0.1)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2, yAxisID: 'y' },
+          { label: 'Power (W)', data: pwData, borderColor: '#f59e0b', backgroundColor: 'transparent', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.5, yAxisID: 'y1' },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { color: '#aaa', boxWidth: 12, font: { size: 11 } } } },
+        scales: {
+          x: { ticks: { color: '#666', maxTicksLimit: 12, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { position: 'left', ticks: { color: '#00d4aa', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' }, title: { display: true, text: 'Sol/s', color: '#00d4aa', font: { size: 10 } } },
+          y1: { position: 'right', ticks: { color: '#f59e0b', font: { size: 10 } }, grid: { drawOnChartArea: false }, title: { display: true, text: 'Watts', color: '#f59e0b', font: { size: 10 } } },
+        },
+      },
+    });
+  } catch(e) {
+    canvas.parentElement.innerHTML = `<p style="color:var(--red);text-align:center">Failed to load history: ${e.message}</p>`;
+  }
 }
 
 function closeModal() {
+  if (_hrChart) { _hrChart.destroy(); _hrChart = null; }
   document.getElementById('modal').classList.remove('active');
 }
 
@@ -845,6 +900,22 @@ async function minerCmd(name, type, command) {
     el.scrollTop = el.scrollHeight;
   } catch(e) {
     el.textContent += `Error: ${e.message}`;
+  }
+}
+
+async function renameRig(name) {
+  const newName = prompt(`Rename "${name}" to:`, name);
+  if (!newName || newName === name) return;
+  try {
+    const r = await fetch(`/api/rigs/${name}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: newName})
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.detail || 'Error'); return; }
+    closeModal();
+  } catch (e) {
+    alert('Error: ' + e.message);
   }
 }
 

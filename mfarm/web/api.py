@@ -30,6 +30,7 @@ class RigCreate(BaseModel):
     notes: str | None = None
 
 class RigUpdate(BaseModel):
+    name: str | None = None
     host: str | None = None
     ssh_port: int | None = None
     ssh_user: str | None = None
@@ -63,6 +64,39 @@ def create_rig(data: RigCreate):
               group_id=group_id, notes=data.notes)
     rig.save(db)
     return _rig_to_dict(Rig.get_by_name(db, data.name))
+
+
+@router.put("/rigs/{name}")
+def update_rig(name: str, data: RigUpdate):
+    db = get_db()
+    rig = Rig.get_by_name(db, name)
+    if not rig:
+        raise HTTPException(404, f"Rig '{name}' not found")
+    if data.name is not None:
+        existing = Rig.get_by_name(db, data.name)
+        if existing and existing.id != rig.id:
+            raise HTTPException(400, f"Rig '{data.name}' already exists")
+        rig.name = data.name
+    if data.host is not None:
+        rig.host = data.host
+    if data.ssh_port is not None:
+        rig.ssh_port = data.ssh_port
+    if data.ssh_user is not None:
+        rig.ssh_user = data.ssh_user
+    if data.ssh_key_path is not None:
+        rig.ssh_key_path = data.ssh_key_path
+    if data.group is not None:
+        if data.group:
+            grp = Group.get_by_name(db, data.group)
+            if not grp:
+                raise HTTPException(400, f"Group '{data.group}' not found")
+            rig.group_id = grp.id
+        else:
+            rig.group_id = None
+    if data.notes is not None:
+        rig.notes = data.notes
+    rig.save(db)
+    return _rig_to_dict(rig)
 
 
 @router.delete("/rigs/{name}")
@@ -154,6 +188,25 @@ def _rig_to_dict(r: Rig) -> dict:
         "agent_version": r.agent_version, "gpu_list": r.gpu_names,
         "cpu_model": r.cpu_model, "os_info": r.os_info, "notes": r.notes,
     }
+
+
+@router.get("/rigs/{name}/history")
+def get_rig_history(name: str, hours: int = 24):
+    """Get hashrate/power history for a rig over the past N hours."""
+    db = get_db()
+    rig = Rig.get_by_name(db, name)
+    if not rig:
+        raise HTTPException(404, f"Rig '{name}' not found")
+    rows = db.execute(
+        "SELECT timestamp, hashrate, power_draw, accepted, rejected "
+        "FROM rig_snapshots WHERE rig_id = ? AND timestamp >= datetime('now', ?) "
+        "ORDER BY timestamp ASC",
+        (rig.id, f"-{hours} hours"),
+    ).fetchall()
+    return [
+        {"t": r[0], "hr": r[1], "power": r[2], "acc": r[3], "rej": r[4]}
+        for r in rows
+    ]
 
 
 # ── Flight Sheets ────────────────────────────────────────────────────
