@@ -216,6 +216,14 @@ echo "blacklist nouveau" >> "$MNT/etc/modprobe.d/blacklist.conf" 2>/dev/null || 
 # Rebuild initramfs without nouveau
 chroot "$MNT" update-initramfs -u 2>/dev/null || true
 
+# Generate machine-id (journald fails without it)
+chroot "$MNT" systemd-machine-id-setup 2>/dev/null || \
+    python3 -c "import uuid; print(uuid.uuid4().hex)" > "$MNT/etc/machine-id"
+chmod 444 "$MNT/etc/machine-id"
+
+# Ensure /run/log/journal exists for volatile storage
+mkdir -p "$MNT/run/log/journal"
+
 # Configure journald: volatile storage, reasonable limits
 mkdir -p "$MNT/etc/systemd"
 cat > "$MNT/etc/systemd/journald.conf" <<JCONF
@@ -223,6 +231,13 @@ cat > "$MNT/etc/systemd/journald.conf" <<JCONF
 Storage=volatile
 RuntimeMaxUse=50M
 JCONF
+
+# Make journald fail fast instead of hanging 3 minutes if something is wrong
+mkdir -p "$MNT/etc/systemd/system/systemd-journald.service.d"
+cat > "$MNT/etc/systemd/system/systemd-journald.service.d/override.conf" <<JOVERRIDE
+[Service]
+TimeoutStartSec=10
+JOVERRIDE
 echo "[4/7] Done"
 
 # [5/7] MeowFarm agent + miners
