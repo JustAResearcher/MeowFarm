@@ -54,22 +54,26 @@ sgdisk -e /tmp/ubuntu-raw.img >/dev/null 2>&1
 echo "  Cloud image partition layout:"
 sgdisk -p /tmp/ubuntu-raw.img
 
-# Find root partition (largest one)
-ROOT_PARTNUM=$(sgdisk -p /tmp/ubuntu-raw.img | awk '/Linux filesystem/ {print $1}' | tail -1)
-ROOT_START=$(sgdisk -i "$ROOT_PARTNUM" /tmp/ubuntu-raw.img 2>/dev/null | grep "First sector" | awk '{print $3}')
+# Cloud image layout: p14=BIOS(EF02), p15=EFI(EF00), p1=root(8300)
+# Root is partition 1, starts at sector 227328
+ROOT_PARTNUM=1
+ROOT_START=$(sgdisk -i 1 /tmp/ubuntu-raw.img 2>/dev/null | grep "First sector" | awk '{print $3}')
 echo "  Root partition: $ROOT_PARTNUM (starts at sector $ROOT_START)"
 
 # Delete and recreate root partition to fill disk
 sgdisk -d "$ROOT_PARTNUM" /tmp/ubuntu-raw.img >/dev/null
 sgdisk -n "$ROOT_PARTNUM:$ROOT_START:0" -t "$ROOT_PARTNUM:8300" /tmp/ubuntu-raw.img >/dev/null
 
+# EFI is partition 15
+EFI_PARTNUM=15
+
 cp /tmp/ubuntu-raw.img "$IMG"
 rm -f /tmp/ubuntu-raw.img
 
-# Set up loop devices
+# Set up loop devices using exact partition info
 echo "  Setting up loop devices..."
-EFI_START=$(sgdisk -p "$IMG" | awk '/EFI/ {print $2}')
-EFI_END=$(sgdisk -p "$IMG" | awk '/EFI/ {print $3}')
+EFI_START=$(sgdisk -i "$EFI_PARTNUM" "$IMG" 2>/dev/null | grep "First sector" | awk '{print $3}')
+EFI_END=$(sgdisk -i "$EFI_PARTNUM" "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
 EFI_OFFSET=$((EFI_START * 512))
 EFI_SIZE=$(( (EFI_END - EFI_START + 1) * 512 ))
 ROOT_OFFSET=$((ROOT_START * 512))
@@ -397,7 +401,7 @@ umount "$MNT" 2>/dev/null || true
 
 # Shrink root filesystem to fit partition exactly
 echo "  Final filesystem check..."
-ROOT_END=$(sgdisk -i "$ROOT_PARTNUM" "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
+ROOT_END=$(sgdisk -i 1 "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
 if [ -n "$ROOT_END" ]; then
     PART_BLOCKS=$(( (ROOT_END - ROOT_START + 1) / 8 ))
     e2fsck -f -y "$ROOT_LOOP" || true
