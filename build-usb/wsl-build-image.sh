@@ -152,7 +152,8 @@ apt-get install -y -qq \
     software-properties-common ubuntu-drivers-common \
     sudo locales iproute2 iputils-ping netplan.io \
     xserver-xorg-core xinit x11-xserver-utils \
-    cloud-guest-utils gdisk
+    cloud-guest-utils gdisk \
+    dbus dbus-user-session
 locale-gen en_US.UTF-8
 
 useradd -m -s /bin/bash -G sudo,video miner
@@ -176,7 +177,6 @@ ExecStart=-/sbin/agetty --autologin miner --noclear %I $TERM
 AUTOLOGIN
 
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-# journal-flush masked after chroot (see below)
 
 cat > /etc/rc.local <<'RC'
 #!/bin/bash
@@ -216,28 +216,16 @@ echo "blacklist nouveau" >> "$MNT/etc/modprobe.d/blacklist.conf" 2>/dev/null || 
 # Rebuild initramfs without nouveau
 chroot "$MNT" update-initramfs -u 2>/dev/null || true
 
-# Generate machine-id (journald fails without it)
+# Fix journald: generate machine-id + create persistent journal dir
+# All previous custom journal configs made things worse. Use Ubuntu defaults.
 chroot "$MNT" systemd-machine-id-setup 2>/dev/null || \
     python3 -c "import uuid; print(uuid.uuid4().hex)" > "$MNT/etc/machine-id"
 chmod 444 "$MNT/etc/machine-id"
-
-# Ensure /run/log/journal exists for volatile storage
-mkdir -p "$MNT/run/log/journal"
-
-# Configure journald: volatile storage, reasonable limits
-mkdir -p "$MNT/etc/systemd"
-cat > "$MNT/etc/systemd/journald.conf" <<JCONF
-[Journal]
-Storage=volatile
-RuntimeMaxUse=50M
-JCONF
-
-# Make journald fail fast instead of hanging 3 minutes if something is wrong
-mkdir -p "$MNT/etc/systemd/system/systemd-journald.service.d"
-cat > "$MNT/etc/systemd/system/systemd-journald.service.d/override.conf" <<JOVERRIDE
-[Service]
-TimeoutStartSec=10
-JOVERRIDE
+mkdir -p "$MNT/var/log/journal"
+chroot "$MNT" systemd-tmpfiles --create --prefix /var/log/journal 2>/dev/null || true
+# Remove any custom journald config from previous builds
+rm -f "$MNT/etc/systemd/journald.conf"
+rm -rf "$MNT/etc/systemd/system/systemd-journald.service.d"
 echo "[4/7] Done"
 
 # [5/7] MeowFarm agent + miners
