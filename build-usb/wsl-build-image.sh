@@ -202,10 +202,27 @@ SETUP
 chmod +x "$MNT/tmp/setup.sh"
 chroot "$MNT" /tmp/setup.sh
 
-# Kill journal-flush AFTER all packages are installed (packages overwrite symlinks)
-ln -sf /dev/null "$MNT/etc/systemd/system/systemd-journal-flush.service"
-ln -sf /dev/null "$MNT/etc/systemd/system/systemd-journal-flush.socket"
-ln -sf /dev/null "$MNT/etc/systemd/system/systemd-journal-catalog-update.service"
+# Nuclear option: DELETE journal-flush service files + force volatile journal
+# Masking (symlinks, kernel cmdline) all failed. Delete the actual unit files.
+rm -f "$MNT/lib/systemd/system/systemd-journal-flush.service"
+rm -f "$MNT/lib/systemd/system/systemd-journal-flush.socket"
+rm -f "$MNT/lib/systemd/system/systemd-journal-catalog-update.service"
+rm -f "$MNT/etc/systemd/system/systemd-journal-flush.service"
+rm -f "$MNT/etc/systemd/system/systemd-journal-flush.socket"
+rm -f "$MNT/etc/systemd/system/systemd-journal-catalog-update.service"
+# Remove any symlinks in wants/requires dirs
+find "$MNT/etc/systemd" "$MNT/lib/systemd" -name "*journal-flush*" -delete 2>/dev/null || true
+find "$MNT/etc/systemd" "$MNT/lib/systemd" -name "*journal-catalog*" -delete 2>/dev/null || true
+# Configure journald: volatile only (RAM), no disk writes
+mkdir -p "$MNT/etc/systemd"
+cat > "$MNT/etc/systemd/journald.conf" <<JCONF
+[Journal]
+Storage=volatile
+RuntimeMaxUse=50M
+ForwardToConsole=no
+JCONF
+# Don't create /var/log/journal (forces volatile)
+rm -rf "$MNT/var/log/journal"
 echo "[4/7] Done"
 
 # [5/7] MeowFarm agent + miners
