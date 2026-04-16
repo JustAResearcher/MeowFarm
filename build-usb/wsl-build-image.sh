@@ -216,6 +216,10 @@ chroot "$MNT" update-initramfs -u 2>/dev/null || true
 mv "$MNT/lib/systemd/systemd-journald" "$MNT/lib/systemd/systemd-journald.real"
 ln -s /bin/true "$MNT/lib/systemd/systemd-journald"
 
+# Disable rsyslog entirely (with journald gone, rsyslog fills disk to 100%)
+chroot "$MNT" systemctl disable rsyslog.service 2>/dev/null || true
+chroot "$MNT" systemctl mask rsyslog.service 2>/dev/null || true
+
 # Limit syslog/kern.log size (journald replacement causes rsyslog to fill disk)
 cat > "$MNT/etc/logrotate.d/rsyslog-mining" <<'LOGROT'
 /var/log/syslog /var/log/kern.log {
