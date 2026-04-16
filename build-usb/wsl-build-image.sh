@@ -128,12 +128,6 @@ apt-get install -y \
     xserver-xorg-core xinit x11-xserver-utils \
     cloud-guest-utils gdisk
 
-# NVIDIA drivers baked into image - no network needed on first boot
-add-apt-repository -y ppa:graphics-drivers/ppa
-apt-get update -qq
-apt-get install -y --no-install-recommends nvidia-driver-570
-echo "NVIDIA driver installed: $(dpkg -l nvidia-driver-570 | grep ^ii | awk '{print $3}')"
-
 # Verify r8169 is present
 KVER=$(ls /lib/modules/ | sort -V | tail -1)
 echo "Kernel: $KVER"
@@ -192,6 +186,19 @@ echo "SETUP_DONE"
 SETUP
 chmod +x "$MNT/tmp/setup.sh"
 chroot "$MNT" /tmp/setup.sh
+
+# NVIDIA drivers - separate step so base install survives if this fails
+echo "  Installing NVIDIA driver 570..."
+cat > "$MNT/tmp/nvidia-setup.sh" <<'NVSETUP'
+#!/bin/bash
+export DEBIAN_FRONTEND=noninteractive
+add-apt-repository -y ppa:graphics-drivers/ppa
+apt-get update -qq
+apt-get install -y --no-install-recommends nvidia-driver-570
+echo "NVIDIA: $(dpkg -l nvidia-driver-570 2>/dev/null | grep ^ii | awk '{print $3}')"
+NVSETUP
+chmod +x "$MNT/tmp/nvidia-setup.sh"
+chroot "$MNT" /tmp/nvidia-setup.sh || echo "WARN: NVIDIA driver install failed (will retry on first boot)"
 
 # Force-load common NIC drivers on boot
 echo -e "r8169\ne1000e\nigb" > "$MNT/etc/modules-load.d/nic-drivers.conf"
