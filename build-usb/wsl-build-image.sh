@@ -227,6 +227,13 @@ chmod +x "$MNT/opt/mfarm/meowos-webui.py"
 cp "$SRC/build-usb/mfarm-files/config.json" "$MNT/etc/mfarm/config.json"
 chroot "$MNT" chown -R miner:miner /etc/mfarm /opt/mfarm /var/log/mfarm /var/run/mfarm
 
+# 'miner' command shows live miner output
+cat > "$MNT/usr/local/bin/miner" <<'MINERCMD'
+#!/bin/bash
+tail -n 50 -f /var/log/mfarm/miner.log
+MINERCMD
+chmod +x "$MNT/usr/local/bin/miner"
+
 # Miners (optional)
 cd /tmp
 tar xzf "$SRC/ccminer-patch/hiveos/ccminer-6390-v21.1.1.tar.gz" 2>/dev/null || true
