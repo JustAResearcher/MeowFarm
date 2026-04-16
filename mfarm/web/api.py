@@ -430,21 +430,21 @@ async def apply_oc_profile(oc_name: str, target: str):
             oc_script += 'nvidia-smi -pm 1 > /dev/null 2>&1\n'
             oc_script += f'echo "OC {oc_name} applied at $(date)" >> /var/log/mfarm/oc.log\n'
 
-            # Upload OC script
+            # Upload OC script to temp, then sudo move it
             await loop.run_in_executor(
-                _executor, lambda r=rig, s=oc_script: pool.upload_string(r, s, "/opt/mfarm/apply-oc.sh")
+                _executor, lambda r=rig, s=oc_script: pool.upload_string(r, s, "/tmp/apply-oc.sh")
             )
             await loop.run_in_executor(
-                _executor, lambda r=rig: pool.exec(r, "chmod +x /opt/mfarm/apply-oc.sh", timeout=5)
+                _executor, lambda r=rig: pool.exec(r, "sudo cp /tmp/apply-oc.sh /opt/mfarm/apply-oc.sh && sudo chmod +x /opt/mfarm/apply-oc.sh", timeout=5)
             )
 
             # Create systemd service for boot persistence
             svc = '[Unit]\nDescription=MeowFarm GPU Overclock\nAfter=multi-user.target\nWants=mfarm-agent.service\n\n[Service]\nType=oneshot\nExecStart=/opt/mfarm/apply-oc.sh\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n'
             await loop.run_in_executor(
-                _executor, lambda r=rig, s=svc: pool.upload_string(r, s, "/etc/systemd/system/mfarm-oc.service")
+                _executor, lambda r=rig, s=svc: pool.upload_string(r, s, "/tmp/mfarm-oc.service")
             )
             await loop.run_in_executor(
-                _executor, lambda r=rig: pool.exec(r, "systemctl daemon-reload && systemctl enable mfarm-oc.service", timeout=10)
+                _executor, lambda r=rig: pool.exec(r, "sudo cp /tmp/mfarm-oc.service /etc/systemd/system/mfarm-oc.service && sudo systemctl daemon-reload && sudo systemctl enable mfarm-oc.service", timeout=10)
             )
 
             # Apply now
