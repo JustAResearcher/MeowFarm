@@ -216,6 +216,24 @@ chroot "$MNT" update-initramfs -u 2>/dev/null || true
 mv "$MNT/lib/systemd/systemd-journald" "$MNT/lib/systemd/systemd-journald.real"
 ln -s /bin/true "$MNT/lib/systemd/systemd-journald"
 
+# Limit syslog/kern.log size (journald replacement causes rsyslog to fill disk)
+cat > "$MNT/etc/logrotate.d/rsyslog-mining" <<'LOGROT'
+/var/log/syslog /var/log/kern.log {
+    size 50M
+    rotate 2
+    compress
+    missingok
+    notifempty
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate
+    endscript
+}
+LOGROT
+# Also set rsyslog max file size as safety net
+mkdir -p "$MNT/etc/rsyslog.d"
+echo '$MaxMessageSize 4k' > "$MNT/etc/rsyslog.d/50-maxsize.conf"
+echo '$SystemLogRateLimitBurst 200' >> "$MNT/etc/rsyslog.d/50-maxsize.conf"
+
 echo "[4/7] Done"
 
 # [5/7] MeowFarm agent + miners + web UI
