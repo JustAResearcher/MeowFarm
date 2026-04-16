@@ -69,6 +69,7 @@ class Config:
         self.max_restarts = 5
         self.restart_window = 600
         self.flight_sheet = None
+        self.cpu_flight_sheet = None
         self.oc_profile = None
         self.miner_paths = {}
         self.api_ports = {
@@ -90,6 +91,7 @@ class Config:
             self.max_restarts = agent.get("max_restarts_per_window", self.max_restarts)
             self.restart_window = agent.get("restart_window_secs", self.restart_window)
             self.flight_sheet = data.get("flight_sheet")
+            self.cpu_flight_sheet = data.get("cpu_flight_sheet")
             self.oc_profile = data.get("oc_profile")
             self.miner_paths = data.get("miner_paths", {})
             self.api_ports = {**self.api_ports, **data.get("api_ports", {})}
@@ -896,7 +898,7 @@ class MinerManager:
                     log.error("Failed to start GPU miner: %s", e)
 
         # Start CPU miner (dual mining)
-        cpu_fs = self.config.data.get("cpu_flight_sheet")
+        cpu_fs = self.config.cpu_flight_sheet
         if cpu_fs and not self.is_cpu_running():
             cpu_miner = cpu_fs.get("miner", "")
             cpu_algo = cpu_fs.get("algo", "")
@@ -911,9 +913,9 @@ class MinerManager:
             log.info("Starting CPU miner: %s", cpu_miner)
             try:
                 cpu_log = open(str(MINER_LOG_PATH).replace("miner.log", "cpu-miner.log"), "a")
-                # Use miner-wrapper with a temp config for CPU
-                import copy
-                cpu_config = copy.deepcopy(self.config.data)
+                # Build CPU config by loading main config file and swapping flight_sheet
+                with open("/etc/mfarm/config.json") as f:
+                    cpu_config = json.load(f)
                 cpu_config["flight_sheet"] = cpu_fs
                 cpu_config_path = "/tmp/mfarm-cpu-config.json"
                 with open(cpu_config_path, "w") as f:
