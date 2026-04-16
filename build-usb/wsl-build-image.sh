@@ -225,6 +225,7 @@ cp "$SRC/mfarm/worker/meowos-webui.service" "$MNT/etc/systemd/system/meowos-webu
 chmod +x "$MNT/opt/mfarm/meowos-webui.py"
 
 cp "$SRC/build-usb/mfarm-files/config.json" "$MNT/etc/mfarm/config.json"
+chroot "$MNT" chown -R miner:miner /etc/mfarm /opt/mfarm /var/log/mfarm /var/run/mfarm
 
 # Miners (optional)
 cd /tmp
