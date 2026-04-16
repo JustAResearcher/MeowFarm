@@ -648,6 +648,32 @@ def query_miner_stats(miner_name: str, api_port: int) -> dict | None:
 
 # ── Miner Process Management ──────────────────────────────────────────
 
+def _any_miner_process_alive(miner_name: str) -> bool:
+    """Check if any miner binary is running system-wide."""
+    if not miner_name:
+        return False
+    binary_names = {
+        "lolminer": ["lolMiner", "lolminer"],
+        "miniz": ["miniZ"],
+        "ccminer": ["ccminer"],
+        "xmrig": ["xmrig"],
+        "trex": ["t-rex"],
+        "cpuminer-opt": ["cpuminer"],
+        "srbminer": ["SRBMiner-Multi"],
+    }.get(miner_name.lower(), [miner_name])
+    for proc_dir in Path("/proc").iterdir():
+        if not proc_dir.name.isdigit():
+            continue
+        try:
+            cmdline = (proc_dir / "cmdline").read_bytes().decode(errors="replace")
+            exe = cmdline.split("\x00")[0].rsplit("/", 1)[-1]
+            if exe in binary_names:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 class MinerManager:
     def __init__(self, config: Config):
         self.config = config
@@ -1220,8 +1246,9 @@ class Agent:
                 log.warning("GPU %d temp %d°C >= warning %d°C",
                             gpu.get("index", 0), temp, self.config.max_gpu_temp)
 
-        # Check miner is running
-        if not self.miner.is_running():
+        # Check miner is running (via process AND system-wide process search)
+        miner_name = (self.config.flight_sheet or {}).get("miner", "")
+        if not self.miner.is_running() and not _any_miner_process_alive(miner_name):
             log.warning("Watchdog: miner not running")
             self.miner._do_restart()
             self.zero_hashrate_count = 0
