@@ -109,6 +109,27 @@ def delete_rig(name: str):
     return {"status": "deleted"}
 
 
+@router.get("/rigs/{name}/stats")
+async def get_rig_stats(name: str):
+    """Fetch fresh stats from a rig on demand."""
+    db = get_db()
+    rig = Rig.get_by_name(db, name)
+    if not rig:
+        raise HTTPException(404)
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            _executor, lambda r=rig: pool.exec(r, "cat /var/run/mfarm/stats.json", timeout=5)
+        )
+        stdout = result.get("stdout", "")
+        if stdout.strip():
+            import json as _json
+            return _json.loads(stdout)
+    except Exception:
+        pass
+    return {}
+
+
 @router.post("/rigs/{name}/reboot")
 async def reboot_rig(name: str):
     db = get_db()

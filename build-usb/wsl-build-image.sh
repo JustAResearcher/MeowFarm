@@ -194,7 +194,7 @@ cat > "$MNT/tmp/nvidia-setup.sh" <<'NVSETUP'
 export DEBIAN_FRONTEND=noninteractive
 add-apt-repository -y ppa:graphics-drivers/ppa
 apt-get update -qq
-apt-get install -y --no-install-recommends nvidia-driver-570
+apt-get install -y --no-install-recommends nvidia-driver-570 nvidia-settings
 echo "NVIDIA: $(dpkg -l nvidia-driver-570 2>/dev/null | grep ^ii | awk '{print $3}')"
 NVSETUP
 chmod +x "$MNT/tmp/nvidia-setup.sh"

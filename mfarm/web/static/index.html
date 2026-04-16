@@ -637,7 +637,15 @@ function rigCard(r) {
     </div>`;
 }
 
-function openRig(name) {
+async function openRig(name) {
+  // Force fresh stats fetch when clicking on a rig
+  try {
+    const res = await fetch(`/api/rigs/${name}/stats`);
+    if (res.ok) {
+      const fresh = await res.json();
+      if (rigData[name]) rigData[name].stats = fresh;
+    }
+  } catch(e) {}
   const r = rigData[name];
   if (!r) return;
   const s = r.stats || {};
