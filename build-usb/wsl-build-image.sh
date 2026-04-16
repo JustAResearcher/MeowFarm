@@ -194,8 +194,8 @@ cat > "$MNT/tmp/nvidia-setup.sh" <<'NVSETUP'
 export DEBIAN_FRONTEND=noninteractive
 add-apt-repository -y ppa:graphics-drivers/ppa
 apt-get update -qq
-apt-get install -y --no-install-recommends nvidia-driver-570 nvidia-settings libnvidia-compute-570 ocl-icd-libopencl1 ocl-icd-opencl-dev
-echo "NVIDIA: $(dpkg -l nvidia-driver-570 2>/dev/null | grep ^ii | awk '{print $3}')"
+apt-get install -y --no-install-recommends nvidia-driver-550 nvidia-settings libnvidia-compute-550 libnvidia-gl-550 ocl-icd-libopencl1 ocl-icd-opencl-dev
+echo "NVIDIA: $(dpkg -l nvidia-driver-550 2>/dev/null | grep ^ii | awk '{print $3}')"
 NVSETUP
 chmod +x "$MNT/tmp/nvidia-setup.sh"
 chroot "$MNT" /tmp/nvidia-setup.sh || echo "WARN: NVIDIA driver install failed (will retry on first boot)"
