@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build MeowOS from Ubuntu cloud image (not debootstrap).
-# Cloud images are properly built by Canonical - journald, dbus, etc. all work.
+# MeowOS Image Builder - debootstrap + systemd-boot
+# Builds a bootable raw disk image with loop device offsets
 set -uo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -9,165 +9,81 @@ IMG="/tmp/meowos.img"
 MNT="/tmp/mfarm-rootfs"
 OUTPUT="${MEOWOS_OUTPUT:-/mnt/c/Source/meowos.img}"
 VERSION=$(cat "$SRC/VERSION" 2>/dev/null || echo "1.0.0")
-CLOUD_IMG_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
 
 echo "============================================"
 echo "  MeowOS v$VERSION Image Builder"
-echo "  Base: Ubuntu 22.04 Cloud Image"
 echo "============================================"
 
 # Clean previous state
-echo "Cleaning previous state..."
 umount -R "$MNT" 2>/dev/null || true
-for l in $(losetup -l -n -O NAME 2>/dev/null); do
-    losetup -d "$l" 2>/dev/null || true
-done
+for l in $(losetup -l -n -O NAME 2>/dev/null); do losetup -d "$l" 2>/dev/null || true; done
 rm -f "$IMG" "$OUTPUT"
 
 # Install tools
-echo "Checking tools..."
-apt-get update -qq
-apt-get install -y -qq qemu-utils gdisk dosfstools e2fsprogs 2>/dev/null
+which debootstrap >/dev/null 2>&1 || {
+    apt-get update -qq
+    apt-get install -y -qq debootstrap gdisk dosfstools e2fsprogs
+}
 
-# [1/6] Download cloud image
-if [ -f /tmp/ubuntu-cloud.img ]; then
-    echo "[1/6] Using cached cloud image..."
-else
-    echo "[1/6] Downloading Ubuntu 22.04 cloud image..."
-    wget -q --show-progress -O /tmp/ubuntu-cloud.img "$CLOUD_IMG_URL"
-fi
+# [1/7] Create image
+echo "[1/7] Creating 6GB image..."
+dd if=/dev/zero of="$IMG" bs=1M count=6144 status=progress
 
-# [2/6] Create disk image from cloud image
-echo "[2/6] Creating 6GB disk image..."
-# Convert qcow2 to raw and resize
-qemu-img convert -f qcow2 -O raw /tmp/ubuntu-cloud.img /tmp/ubuntu-raw.img
-truncate -s 6G /tmp/ubuntu-raw.img
+# [2/7] Partition
+echo "[2/7] Partitioning..."
+sgdisk --zap-all "$IMG" >/dev/null 2>&1
+sgdisk -n 1:2048:1050623 -t 1:ef00 -c 1:"EFI" "$IMG" >/dev/null
+sgdisk -n 2:1050624:0 -t 2:8300 -c 2:"root" "$IMG" >/dev/null
 
-# Cloud image has: partition 1 = BIOS boot (1MB), partition 14 = EFI (100MB), partition 15 = root
-# We need to resize the root partition to fill the disk
-# First, fix the GPT for the new size
-sgdisk -e /tmp/ubuntu-raw.img >/dev/null 2>&1
+EFI_OFFSET=$((2048 * 512))
+EFI_SIZE=$((1048576 * 512))
+ROOT_OFFSET=$((1050624 * 512))
 
-# Delete partition 1 (root) and recreate it to fill the space
-# Cloud image layout: p14=EFI(ESP), p15=boot, p1=root
-# Let's check the layout first
-echo "  Cloud image partition layout:"
-sgdisk -p /tmp/ubuntu-raw.img
-
-# Cloud image layout: p14=BIOS(EF02), p15=EFI(EF00), p1=root(8300)
-# Root is partition 1, starts at sector 227328
-ROOT_PARTNUM=1
-ROOT_START=$(sgdisk -i 1 /tmp/ubuntu-raw.img 2>/dev/null | grep "First sector" | awk '{print $3}')
-echo "  Root partition: $ROOT_PARTNUM (starts at sector $ROOT_START)"
-
-# Delete and recreate root partition to fill disk
-sgdisk -d "$ROOT_PARTNUM" /tmp/ubuntu-raw.img >/dev/null
-sgdisk -n "$ROOT_PARTNUM:$ROOT_START:0" -t "$ROOT_PARTNUM:8300" /tmp/ubuntu-raw.img >/dev/null
-
-# EFI is partition 15
-EFI_PARTNUM=15
-
-cp /tmp/ubuntu-raw.img "$IMG"
-rm -f /tmp/ubuntu-raw.img
-
-# Set up loop devices using exact partition info
-echo "  Setting up loop devices..."
-EFI_START=$(sgdisk -i "$EFI_PARTNUM" "$IMG" 2>/dev/null | grep "First sector" | awk '{print $3}')
-EFI_END=$(sgdisk -i "$EFI_PARTNUM" "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
-EFI_OFFSET=$((EFI_START * 512))
-EFI_SIZE=$(( (EFI_END - EFI_START + 1) * 512 ))
-ROOT_OFFSET=$((ROOT_START * 512))
+# Get exact root partition end from sgdisk
+ROOT_END=$(sgdisk -i 2 "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
+ROOT_SIZE=$(( (ROOT_END - 1050624 + 1) * 512 ))
+echo "  Root: sectors 1050624-$ROOT_END = $ROOT_SIZE bytes"
 
 EFI_LOOP=$(losetup --find --show --offset "$EFI_OFFSET" --sizelimit "$EFI_SIZE" "$IMG")
-ROOT_LOOP=$(losetup --find --show --offset "$ROOT_OFFSET" "$IMG")
+ROOT_LOOP=$(losetup --find --show --offset "$ROOT_OFFSET" --sizelimit "$ROOT_SIZE" "$IMG")
 echo "  EFI: $EFI_LOOP  Root: $ROOT_LOOP"
 
-# Resize root filesystem
-echo "  Expanding root filesystem..."
-e2fsck -f -y "$ROOT_LOOP" || true
-resize2fs "$ROOT_LOOP"
+mkfs.fat -F 32 -n MEWOS-EFI "$EFI_LOOP"
+mkfs.ext4 -L meowos-root -F "$ROOT_LOOP"
+echo "[2/7] Done"
 
-echo "[2/6] Done"
-
-# [3/6] Mount and customize
-echo "[3/6] Customizing system..."
-mkdir -p "$MNT"
+# [3/7] Debootstrap
+echo "[3/7] Installing base system (~3 min)..."
+rm -rf "$MNT"; mkdir -p "$MNT"
 mount "$ROOT_LOOP" "$MNT"
 mkdir -p "$MNT/boot/efi"
-mount "$EFI_LOOP" "$MNT/boot/efi" 2>/dev/null || true
+mount "$EFI_LOOP" "$MNT/boot/efi"
 
-# Set up DNS for chroot
-cp /etc/resolv.conf "$MNT/etc/resolv.conf" 2>/dev/null || \
-    printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" > "$MNT/etc/resolv.conf"
+debootstrap --arch=amd64 jammy "$MNT" http://us.archive.ubuntu.com/ubuntu
+echo "[3/7] Done"
 
-mount --bind /dev "$MNT/dev" 2>/dev/null || true
-mount --bind /dev/pts "$MNT/dev/pts" 2>/dev/null || true
-mount -t proc proc "$MNT/proc" 2>/dev/null || true
-mount -t sysfs sys "$MNT/sys" 2>/dev/null || true
+# [4/7] Configure + packages
+echo "[4/7] Configuring system..."
+ROOT_UUID=$(blkid -s UUID -o value "$ROOT_LOOP")
+EFI_UUID=$(blkid -s UUID -o value "$EFI_LOOP")
 
-# Install packages
-chroot "$MNT" bash -c '
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq \
-    linux-image-generic linux-headers-generic linux-modules-extra-generic \
-    openssh-server python3 python3-venv \
-    lm-sensors htop screen wget curl \
-    net-tools pciutils usbutils \
-    smartmontools sysstat nvme-cli \
-    dkms build-essential \
-    software-properties-common ubuntu-drivers-common \
-    sudo locales iproute2 iputils-ping \
-    xserver-xorg-core xinit x11-xserver-utils \
-    cloud-guest-utils gdisk
-locale-gen en_US.UTF-8
-'
+cat > "$MNT/etc/fstab" <<EOF
+UUID=$ROOT_UUID   /          ext4   errors=remount-ro   0 1
+UUID=$EFI_UUID    /boot/efi  vfat   umask=0077          0 1
+EOF
 
-# Create miner user
-chroot "$MNT" bash -c '
-useradd -m -s /bin/bash -G sudo,video miner 2>/dev/null || true
-echo "miner:mfarm" | chpasswd
-echo "root:mfarm" | chpasswd
-echo "miner ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/miner
-chmod 440 /etc/sudoers.d/miner
-'
+cat > "$MNT/etc/apt/sources.list" <<'EOF'
+deb http://us.archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+deb http://us.archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+deb http://us.archive.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+EOF
 
-# SSH config
-chroot "$MNT" bash -c '
-mkdir -p /home/miner/.ssh
-chmod 700 /home/miner/.ssh
-chown miner:miner /home/miner/.ssh
-sed -i "s/#PermitRootLogin .*/PermitRootLogin yes/" /etc/ssh/sshd_config
-sed -i "s/#PasswordAuthentication .*/PasswordAuthentication yes/" /etc/ssh/sshd_config
-systemctl enable ssh
-'
+echo "mfarm-rig" > "$MNT/etc/hostname"
+printf "127.0.0.1\tlocalhost\n127.0.1.1\tmfarm-rig\n" > "$MNT/etc/hosts"
+ln -sf /usr/share/zoneinfo/UTC "$MNT/etc/localtime"
+rm -f "$MNT/etc/resolv.conf"
+printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" > "$MNT/etc/resolv.conf"
 
-# Auto-login
-chroot "$MNT" bash -c '
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<AUTOLOGIN
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin miner --noclear %I \$TERM
-AUTOLOGIN
-'
-
-# Disable sleep, performance tuning
-chroot "$MNT" bash -c '
-systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-cat > /etc/rc.local <<RC
-#!/bin/bash
-for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-    echo performance > "\$cpu" 2>/dev/null
-done
-nvidia-smi --ecc-config=0 2>/dev/null || true
-nvidia-smi -pm 1 2>/dev/null || true
-exit 0
-RC
-chmod +x /etc/rc.local
-'
-
-# Networking
 mkdir -p "$MNT/etc/netplan"
 cat > "$MNT/etc/netplan/01-mfarm.yaml" <<'EOF'
 network:
@@ -175,26 +91,106 @@ network:
   renderer: networkd
   ethernets:
     all-en:
-      match:
-        name: "en*"
+      match: { name: "en*" }
       dhcp4: true
     all-eth:
-      match:
-        name: "eth*"
+      match: { name: "eth*" }
       dhcp4: true
     all-other:
-      match:
-        driver: "*"
+      match: { driver: "*" }
       dhcp4: true
       optional: true
 EOF
-# Remove cloud-init network config
-rm -f "$MNT/etc/netplan/50-cloud-init.yaml" 2>/dev/null || true
 
-# Rebuild initramfs with all hardware modules (cloud image strips them)
-chroot "$MNT" bash -c 'KVER=$(ls /lib/modules/ | sort -V | tail -1); update-initramfs -c -k "$KVER"' 2>/dev/null || true
+mount --bind /dev "$MNT/dev" 2>/dev/null || true
+mount --bind /dev/pts "$MNT/dev/pts" 2>/dev/null || true
+mount -t proc proc "$MNT/proc" 2>/dev/null || true
+mount -t sysfs sys "$MNT/sys" 2>/dev/null || true
 
-# Blacklist nouveau
+# Install ALL packages including kernel with hardware drivers
+cat > "$MNT/tmp/setup.sh" <<'SETUP'
+#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+export HOME=/root
+apt-get update -qq
+# linux-generic pulls in image + headers + modules-extra as one package
+apt-get install -y \
+    linux-generic \
+    systemd-sysv dbus \
+    openssh-server python3 python3-venv \
+    lm-sensors htop screen wget curl \
+    net-tools pciutils usbutils \
+    smartmontools sysstat nvme-cli \
+    dkms build-essential \
+    software-properties-common ubuntu-drivers-common \
+    sudo locales iproute2 iputils-ping netplan.io \
+    xserver-xorg-core xinit x11-xserver-utils \
+    cloud-guest-utils gdisk
+
+# Verify r8169 is present
+KVER=$(ls /lib/modules/ | sort -V | tail -1)
+echo "Kernel: $KVER"
+R8169=$(find /lib/modules/$KVER -name "r8169.ko*" | head -1)
+echo "r8169: ${R8169:-NOT FOUND!}"
+if [ -z "$R8169" ]; then
+    echo "FATAL: r8169 not found after installing linux-modules-extra-generic"
+    exit 1
+fi
+
+locale-gen en_US.UTF-8
+
+useradd -m -s /bin/bash -G sudo,video miner
+echo "miner:mfarm" | chpasswd
+echo "root:mfarm" | chpasswd
+echo 'miner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/miner
+chmod 440 /etc/sudoers.d/miner
+
+mkdir -p /home/miner/.ssh
+chmod 700 /home/miner/.ssh
+chown miner:miner /home/miner/.ssh
+sed -i 's/#PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
+sed -i 's/#PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+systemctl enable ssh
+
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<'AUTOLOGIN'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin miner --noclear %I $TERM
+AUTOLOGIN
+
+systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+systemctl enable systemd-networkd
+
+cat > /etc/rc.local <<'RC'
+#!/bin/bash
+for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    echo performance > "$cpu" 2>/dev/null
+done
+nvidia-smi --ecc-config=0 2>/dev/null || true
+nvidia-smi -pm 1 2>/dev/null || true
+exit 0
+RC
+chmod +x /etc/rc.local
+printf '*    soft    nofile    65535\n*    hard    nofile    65535\n' >> /etc/security/limits.conf
+cat > /etc/sysctl.d/99-mfarm.conf <<'SYSCTL'
+vm.swappiness=10
+net.core.somaxconn=65535
+kernel.panic=10
+kernel.panic_on_oops=1
+SYSCTL
+
+sed -i 's/PRETTY_NAME=.*/PRETTY_NAME="MeowOS"/' /etc/os-release
+echo "SETUP_DONE"
+SETUP
+chmod +x "$MNT/tmp/setup.sh"
+chroot "$MNT" /tmp/setup.sh
+
+# Force-load common NIC drivers on boot
+echo -e "r8169\ne1000e\nigb" > "$MNT/etc/modules-load.d/nic-drivers.conf"
+
+# Blacklist nouveau (crashes journald on multi-GPU mining rigs)
 cat > "$MNT/etc/modprobe.d/blacklist-nouveau.conf" <<'NOUVEAU'
 blacklist nouveau
 blacklist lbm-nouveau
@@ -203,31 +199,16 @@ alias nouveau off
 NOUVEAU
 chroot "$MNT" update-initramfs -u 2>/dev/null || true
 
-# Brand as MeowOS
-sed -i "s/PRETTY_NAME=.*/PRETTY_NAME=\"MeowOS v$VERSION\"/" "$MNT/etc/os-release"
-
-# Disable cloud-init (we don't need it)
-chroot "$MNT" bash -c 'touch /etc/cloud/cloud-init.disabled' 2>/dev/null || true
-
-# NUCLEAR: Replace journald with /bin/true
-# journald hangs on every boot attempt regardless of:
-# - masking, symlinks, kernel cmdline, timeouts, drop-ins,
-#   volatile config, machine-id, dbus, cloud images
-# Mining rigs don't need system logging. Kill it dead.
+# Replace journald with /bin/true (hangs on debootstrap images)
 mv "$MNT/lib/systemd/systemd-journald" "$MNT/lib/systemd/systemd-journald.real"
 ln -s /bin/true "$MNT/lib/systemd/systemd-journald"
-# Create the sockets journald normally provides so other services don't complain
-mkdir -p "$MNT/run/systemd/journal"
-# Ensure machine-id exists
-echo "" > "$MNT/etc/machine-id"
 
-echo "[3/6] Done"
+echo "[4/7] Done"
 
-# [4/6] Install MeowFarm agent + miners + web UI
-echo "[4/6] Installing MeowFarm..."
+# [5/7] MeowFarm agent + miners + web UI
+echo "[5/7] Installing MeowFarm..."
 mkdir -p "$MNT/opt/mfarm/miners" "$MNT/etc/mfarm" "$MNT/var/log/mfarm" "$MNT/var/run/mfarm"
-mkdir -p "$MNT/root/.ssh"
-chmod 700 "$MNT/root/.ssh"
+mkdir -p "$MNT/root/.ssh"; chmod 700 "$MNT/root/.ssh"
 
 cp "$SRC/mfarm/worker/mfarm-agent.py" "$MNT/opt/mfarm/mfarm-agent.py"
 cp "$SRC/mfarm/worker/miner-wrapper.sh" "$MNT/opt/mfarm/miner-wrapper.sh"
@@ -243,15 +224,13 @@ cp "$SRC/mfarm/worker/meowos-webui.html" "$MNT/opt/mfarm/meowos-webui.html"
 cp "$SRC/mfarm/worker/meowos-webui.service" "$MNT/etc/systemd/system/meowos-webui.service"
 chmod +x "$MNT/opt/mfarm/meowos-webui.py"
 
-# Clean config (no hardcoded wallets)
 cp "$SRC/build-usb/mfarm-files/config.json" "$MNT/etc/mfarm/config.json"
 
-# Miners (optional - may not exist in CI)
+# Miners (optional)
 cd /tmp
 tar xzf "$SRC/ccminer-patch/hiveos/ccminer-6390-v21.1.1.tar.gz" 2>/dev/null || true
 cp /tmp/ccminer "$MNT/opt/mfarm/miners/ccminer" 2>/dev/null || echo "WARN: ccminer not found"
 chmod +x "$MNT/opt/mfarm/miners/ccminer" 2>/dev/null || true
-
 tar xzf "$SRC/build-usb/mfarm-files/xmrig-nodevfee-hiveos.tar.gz" 2>/dev/null || true
 cp /tmp/xmrig-nodevfee/xmrig "$MNT/opt/mfarm/miners/xmrig" 2>/dev/null || echo "WARN: xmrig not found"
 chmod +x "$MNT/opt/mfarm/miners/xmrig" 2>/dev/null || true
@@ -262,63 +241,78 @@ chroot "$MNT" bash -c 'dpkg -i --force-depends /tmp/libcudart12.deb 2>/dev/null;
 echo '/usr/local/cuda-12.8/targets/x86_64-linux/lib' > "$MNT/etc/ld.so.conf.d/cuda-12.conf"
 chroot "$MNT" ldconfig
 
-# First-boot script
+# Firstboot script
 cat > "$MNT/opt/mfarm/mfarm-firstboot.sh" <<'FB'
 #!/bin/bash
 set -uo pipefail
 mkdir -p /var/run/mfarm /var/log/mfarm
 LOG="/var/log/mfarm/firstboot.log"
 MARKER="/opt/mfarm/.firstboot-done"
-exec > >(tee -a "$LOG") 2>&1
-echo "=== MeowOS First-Boot ==="
+TOTAL=7
+STEP=0
+
+show() {
+    STEP=$((STEP + 1))
+    PCT=$((STEP * 100 / TOTAL))
+    BAR=""
+    FILL=$((PCT / 5))
+    EMPTY=$((20 - FILL))
+    for i in $(seq 1 $FILL); do BAR="${BAR}#"; done
+    for i in $(seq 1 $EMPTY); do BAR="${BAR}-"; done
+    clear
+    echo ""
+    echo "  MeowOS First-Boot Setup"
+    echo "  [${BAR}] ${PCT}%"
+    echo "  ${1}..."
+    echo ""
+    echo "$1" >> "$LOG"
+}
+
+exec 2>> "$LOG"
+
 if [[ -f "$MARKER" ]]; then echo "Already done."; systemctl disable mfarm-firstboot.service; exit 0; fi
 
-# Generate SSH keys
-echo "Generating SSH keys..."
-ssh-keygen -A
-su - miner -c 'ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519' 2>/dev/null || true
+show "Generating SSH keys"
+ssh-keygen -A >> "$LOG" 2>&1
+su - miner -c 'ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519' >> "$LOG" 2>&1 || true
 
-# Expand root partition
-echo "Expanding root partition..."
+show "Expanding root partition"
 ROOT_DEV=$(findmnt -n -o SOURCE /)
 ROOT_DISK=$(echo "$ROOT_DEV" | sed 's/[0-9]*$//')
 ROOT_PARTNUM=$(echo "$ROOT_DEV" | grep -o '[0-9]*$')
-sgdisk -e "$ROOT_DISK" 2>/dev/null || true
-growpart "$ROOT_DISK" "$ROOT_PARTNUM" 2>/dev/null || true
-resize2fs "$ROOT_DEV" 2>/dev/null || true
-echo "  Root: $(df -h / | tail -1 | awk '{print $2}')"
+sgdisk -e "$ROOT_DISK" >> "$LOG" 2>&1 || true
+growpart "$ROOT_DISK" "$ROOT_PARTNUM" >> "$LOG" 2>&1 || true
+resize2fs "$ROOT_DEV" >> "$LOG" 2>&1 || true
 
-# Network
+show "Connecting to network"
 for i in $(seq 1 30); do ping -c 1 -W 2 8.8.8.8 &>/dev/null && break; sleep 2; done
 
-# NVIDIA drivers
-apt-get update -qq
+show "Installing NVIDIA drivers (this takes a few minutes)"
+apt-get update -qq >> "$LOG" 2>&1
 if lspci | grep -qi nvidia; then
-    apt-get install -y -qq software-properties-common
-    add-apt-repository -y ppa:graphics-drivers/ppa
-    apt-get update -qq
-    apt-get install -y -qq ubuntu-drivers-common
+    apt-get install -y -qq software-properties-common >> "$LOG" 2>&1
+    add-apt-repository -y ppa:graphics-drivers/ppa >> "$LOG" 2>&1
+    apt-get update -qq >> "$LOG" 2>&1
+    apt-get install -y -qq ubuntu-drivers-common >> "$LOG" 2>&1
     RECOMMENDED=$(ubuntu-drivers devices 2>/dev/null | grep "recommended" | head -1 | awk '{print $3}')
-    [[ -n "$RECOMMENDED" ]] && apt-get install -y -qq "$RECOMMENDED" || apt-get install -y -qq nvidia-driver-580-open
-    nvidia-smi -pm 1 2>/dev/null || true
+    [[ -n "$RECOMMENDED" ]] && apt-get install -y -qq "$RECOMMENDED" >> "$LOG" 2>&1 || apt-get install -y -qq nvidia-driver-580-open >> "$LOG" 2>&1
+    nvidia-smi -pm 1 >> "$LOG" 2>&1 || true
 fi
-sensors-detect --auto >/dev/null 2>&1 || true
+sensors-detect --auto >> "$LOG" 2>&1 || true
 
-# Hostname
+show "Configuring hostname"
 MAC_SUFFIX=$(ip link show | grep -m1 "link/ether" | awk '{print $2}' | tr -d ':' | tail -c 5)
 hostnamectl set-hostname "mfarm-rig-${MAC_SUFFIX}"
 sed -i "s/127.0.1.1.*/127.0.1.1\tmfarm-rig-${MAC_SUFFIX}/" /etc/hosts
+nvidia-xconfig --enable-all-gpus --cool-bits=31 --allow-empty-initial-configuration >> "$LOG" 2>&1 || true
 
-nvidia-xconfig --enable-all-gpus --cool-bits=31 --allow-empty-initial-configuration 2>/dev/null || true
+show "Starting MeowOS services"
+systemctl enable mfarm-agent >> "$LOG" 2>&1
+systemctl enable meowos-phonehome.service >> "$LOG" 2>&1
+systemctl enable meowos-webui.service >> "$LOG" 2>&1
+systemctl start meowos-phonehome.service >> "$LOG" 2>&1
+systemctl start meowos-webui.service >> "$LOG" 2>&1
 
-# Enable services
-systemctl enable mfarm-agent
-systemctl enable meowos-phonehome.service
-systemctl enable meowos-webui.service
-systemctl start meowos-phonehome.service
-systemctl start meowos-webui.service
-
-# MOTD
 RIG_IP=$(ip -4 addr show | grep -oP 'inet \K[0-9.]+' | grep -v '127.0.0.1' | head -1)
 cat > /etc/motd <<MOTD
 
@@ -333,11 +327,10 @@ cat > /etc/motd <<MOTD
 
 MOTD
 
+show "Setup complete! Rebooting"
 touch "$MARKER"
 systemctl disable mfarm-firstboot.service
-echo "=== MeowOS First-Boot Complete ==="
-echo "  Rebooting in 10s..."
-sleep 10
+sleep 5
 reboot
 FB
 chmod +x "$MNT/opt/mfarm/mfarm-firstboot.sh"
@@ -361,32 +354,25 @@ chroot "$MNT" systemctl enable mfarm-firstboot.service
 
 # Cleanup
 chroot "$MNT" apt-get clean
-rm -rf "$MNT/var/lib/apt/lists/"*
-rm -rf "$MNT/tmp/"*
+rm -rf "$MNT/var/lib/apt/lists/"* "$MNT/tmp/"*
 
-echo "[4/6] Done"
+echo "[5/7] Done"
 
-# [5/6] Boot loader (systemd-boot)
-echo "[5/6] Setting up boot..."
+# [6/7] Systemd-boot
+echo "[6/7] Installing boot..."
 KERNEL=$(ls "$MNT/boot/vmlinuz-"* 2>/dev/null | sort -V | tail -1 | xargs -r basename)
 INITRD=$(ls "$MNT/boot/initrd.img-"* 2>/dev/null | sort -V | tail -1 | xargs -r basename)
-ROOT_UUID=$(blkid -s UUID -o value "$ROOT_LOOP")
 
-if [ -z "$KERNEL" ]; then echo "FATAL: No kernel found"; ls "$MNT/boot/"; exit 1; fi
+if [ -z "$KERNEL" ]; then echo "FATAL: No kernel"; ls "$MNT/boot/"; exit 1; fi
 if [ -z "$INITRD" ]; then
     KVER="${KERNEL#vmlinuz-}"
     chroot "$MNT" update-initramfs -c -k "$KVER" 2>/dev/null || true
     INITRD=$(ls "$MNT/boot/initrd.img-"* 2>/dev/null | sort -V | tail -1 | xargs -r basename)
 fi
-echo "  Kernel: $KERNEL"
-echo "  Initrd: $INITRD"
-echo "  Root UUID: $ROOT_UUID"
+echo "  Kernel: $KERNEL  Initrd: $INITRD  Root: $ROOT_UUID"
 
-# Install systemd-boot
 mkdir -p "$MNT/boot/efi/EFI/BOOT" "$MNT/boot/efi/loader/entries"
 cp "$MNT/usr/lib/systemd/boot/efi/systemd-bootx64.efi" "$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI"
-
-# Copy kernel to EFI partition
 cp "$MNT/boot/$KERNEL" "$MNT/boot/efi/$KERNEL"
 cp "$MNT/boot/$INITRD" "$MNT/boot/efi/$INITRD"
 
@@ -402,36 +388,21 @@ initrd  /$INITRD
 options root=UUID=$ROOT_UUID rw quiet net.ifnames=0 biosdevname=0 nouveau.modeset=0 modprobe.blacklist=nouveau
 ENTRY
 
-echo "  systemd-boot: OK"
-echo "[5/6] Done"
+echo "[6/7] Done"
 
-# [6/6] Finalize
-echo "[6/6] Finalizing image..."
-umount "$MNT/dev/pts" 2>/dev/null || true
-umount "$MNT/dev" 2>/dev/null || true
-umount "$MNT/proc" 2>/dev/null || true
-umount "$MNT/sys" 2>/dev/null || true
-umount "$MNT/boot/efi" 2>/dev/null || true
-umount "$MNT" 2>/dev/null || true
+# [7/7] Finalize
+echo "[7/7] Finalizing..."
+umount "$MNT/dev/pts" "$MNT/dev" "$MNT/proc" "$MNT/sys" 2>/dev/null || true
+umount "$MNT/boot/efi" "$MNT" 2>/dev/null || true
 
-# Shrink root filesystem to fit partition exactly
-echo "  Final filesystem check..."
-ROOT_END=$(sgdisk -i 1 "$IMG" 2>/dev/null | grep "Last sector" | awk '{print $3}')
-if [ -n "$ROOT_END" ]; then
-    PART_BLOCKS=$(( (ROOT_END - ROOT_START + 1) / 8 ))
-    e2fsck -f -y "$ROOT_LOOP" || true
-    resize2fs "$ROOT_LOOP" "$PART_BLOCKS" 2>/dev/null || true
-    e2fsck -f -y "$ROOT_LOOP" || true
-fi
+# Final filesystem check
+e2fsck -f -y "$ROOT_LOOP" || true
 
-losetup -d "$EFI_LOOP" 2>/dev/null || true
-losetup -d "$ROOT_LOOP" 2>/dev/null || true
+losetup -d "$EFI_LOOP" "$ROOT_LOOP" 2>/dev/null || true
 sync
 
 if [ "$IMG" != "$OUTPUT" ]; then
-    echo "Copying image to $OUTPUT..."
-    cp "$IMG" "$OUTPUT"
-    rm -f "$IMG"
+    cp "$IMG" "$OUTPUT"; rm -f "$IMG"
 else
     echo "Image at $OUTPUT"
 fi
@@ -439,5 +410,4 @@ fi
 echo ""
 echo "============================================"
 echo "  MeowOS v$VERSION built successfully!"
-echo "  Base: Ubuntu 22.04 Cloud Image"
 echo "============================================"
