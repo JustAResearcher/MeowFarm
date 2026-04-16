@@ -436,8 +436,8 @@ main { padding: 20px 24px; }
       <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:700px">
         <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Name</label><input id="fs-name" placeholder="luckypepe-solo" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
         <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Coin</label><input id="fs-coin" placeholder="LKPEPE" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
-        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Algorithm</label><input id="fs-algo" placeholder="yescryptR32" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
-        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Miner</label><select id="fs-miner" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"><option>ccminer</option><option>cpuminer-opt</option><option>trex</option><option>lolminer</option><option>xmrig</option></select></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Miner</label><select id="fs-miner" onchange="onFSMinerChange()" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></select></div>
+        <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Algorithm</label><select id="fs-algo" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></select></div>
         <div style="grid-column:1/-1"><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Pool URL</label><input id="fs-pool" placeholder="stratum+tcp://pool:3333 or http://node:9778" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
         <div style="grid-column:1/-1"><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Wallet</label><input id="fs-wallet" placeholder="Wallet address" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
         <div><label style="display:block;color:var(--text-dim);font-size:12px;margin-bottom:4px">Password</label><input id="fs-pass" value="x" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px"></div>
@@ -1063,6 +1063,28 @@ async function deleteFS(name) {
   await fetch(`/api/flightsheets/${name}`, { method: 'DELETE' });
   loadFlightSheets();
 }
+
+// Miner registry for algo dropdown
+let _miners = [];
+async function loadMinerRegistry() {
+  try {
+    _miners = await (await fetch('/api/miners')).json();
+    const sel = document.getElementById('fs-miner');
+    sel.innerHTML = _miners.map(m =>
+      `<option value="${m.name}">${m.display_name} (${m.gpu_type})</option>`
+    ).join('');
+    onFSMinerChange();
+  } catch(e) { console.error('Failed to load miners', e); }
+}
+function onFSMinerChange() {
+  const name = document.getElementById('fs-miner').value;
+  const m = _miners.find(x => x.name === name);
+  const algoSel = document.getElementById('fs-algo');
+  if (m) {
+    algoSel.innerHTML = m.algos.map(a => `<option value="${a}">${a}</option>`).join('');
+  }
+}
+loadMinerRegistry();
 
 async function createFS() {
   const result = document.getElementById('fs-create-result');

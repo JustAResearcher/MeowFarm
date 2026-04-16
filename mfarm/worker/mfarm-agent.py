@@ -650,6 +650,7 @@ class MinerManager:
     def __init__(self, config: Config):
         self.config = config
         self.process: subprocess.Popen | None = None
+        self.cpu_process: subprocess.Popen | None = None
         self.restart_times: list[float] = []
         self.total_restarts = 0
 
@@ -844,59 +845,116 @@ class MinerManager:
             except (OSError, IndexError):
                 continue
 
+    def _build_command_from_fs(self, fs: dict) -> list[str] | None:
+        """Build miner command line from a flight sheet dict."""
+        if not fs:
+            return None
+        miner = fs.get("miner", "")
+        algo = fs.get("algo", "")
+        pool = fs.get("pool_url", "")
+        wallet = fs.get("wallet", "")
+        worker = fs.get("worker", socket.gethostname())
+        password = fs.get("password", "x")
+        extra = fs.get("extra_args", "")
+        is_solo = fs.get("is_solo", False)
+        port = self.config.api_ports.get(miner, 4068)
+
+        binary = self.config.miner_paths.get(miner)
+        if not binary:
+            miners_dir = Path("/opt/mfarm/miners")
+            if miners_dir.is_dir():
+                for f in miners_dir.iterdir():
+                    if f.name.lower() == miner.lower() and f.is_file():
+                        binary = str(f)
+                        break
+            if not binary:
+                binary = miner
+        return ["/opt/mfarm/miner-wrapper.sh"]  # wrapper handles all miner types
+
     def start(self) -> bool:
-        """Start the miner process."""
-        if self.is_running():
-            log.info("Miner already running (PID %d)", self.process.pid)
-            return True
-
-        cmd = self.build_command()
-        if not cmd:
-            log.warning("No flight sheet configured, cannot start miner")
-            return False
-
-        # Kill any stale miner processes before starting
-        # Keep CPU miners alive if we're starting a GPU miner (dual mining)
-        miner_name = (self.config.flight_sheet or {}).get("miner", "")
-        is_cpu_miner = miner_name in ("cpuminer-opt", "cpuminer", "xmrig")
-        self._kill_stale_miners(keep_cpu=not is_cpu_miner)
-
+        """Start GPU and CPU miner processes."""
+        self._kill_stale_miners(keep_cpu=False)
         self.apply_overclock()
+        started = False
 
-        log.info("Starting miner: %s", " ".join(cmd))
-        try:
-            log_file = open(MINER_LOG_PATH, "a")
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                preexec_fn=os.setsid,
-            )
-            PID_PATH.write_text(str(self.process.pid))
-            log.info("Miner started with PID %d", self.process.pid)
-            return True
-        except Exception as e:
-            log.error("Failed to start miner: %s", e)
-            return False
+        # Start GPU miner
+        fs = self.config.flight_sheet
+        if fs and not self.is_running():
+            cmd = self.build_command()
+            if cmd:
+                log.info("Starting GPU miner: %s", fs.get("miner"))
+                try:
+                    log_file = open(MINER_LOG_PATH, "a")
+                    self.process = subprocess.Popen(
+                        cmd, stdout=log_file, stderr=subprocess.STDOUT,
+                        preexec_fn=os.setsid,
+                    )
+                    PID_PATH.write_text(str(self.process.pid))
+                    log.info("GPU miner started (PID %d)", self.process.pid)
+                    started = True
+                except Exception as e:
+                    log.error("Failed to start GPU miner: %s", e)
+
+        # Start CPU miner (dual mining)
+        cpu_fs = self.config.data.get("cpu_flight_sheet")
+        if cpu_fs and not self.is_cpu_running():
+            cpu_miner = cpu_fs.get("miner", "")
+            cpu_algo = cpu_fs.get("algo", "")
+            cpu_pool = cpu_fs.get("pool_url", "")
+            cpu_wallet = cpu_fs.get("wallet", "")
+            cpu_worker = cpu_fs.get("worker", socket.gethostname())
+            cpu_password = cpu_fs.get("password", "x")
+            cpu_extra = cpu_fs.get("extra_args", "")
+            cpu_port = self.config.api_ports.get(cpu_miner, 44445)
+            cpu_binary = self.config.miner_paths.get(cpu_miner, cpu_miner)
+
+            log.info("Starting CPU miner: %s", cpu_miner)
+            try:
+                cpu_log = open(str(MINER_LOG_PATH).replace("miner.log", "cpu-miner.log"), "a")
+                # Use miner-wrapper with a temp config for CPU
+                import copy
+                cpu_config = copy.deepcopy(self.config.data)
+                cpu_config["flight_sheet"] = cpu_fs
+                cpu_config_path = "/tmp/mfarm-cpu-config.json"
+                with open(cpu_config_path, "w") as f:
+                    json.dump(cpu_config, f)
+                self.cpu_process = subprocess.Popen(
+                    ["/opt/mfarm/miner-wrapper.sh", cpu_config_path],
+                    stdout=cpu_log, stderr=subprocess.STDOUT,
+                    preexec_fn=os.setsid,
+                )
+                log.info("CPU miner started (PID %d)", self.cpu_process.pid)
+                started = True
+            except Exception as e:
+                log.error("Failed to start CPU miner: %s", e)
+
+        if not started and not fs and not cpu_fs:
+            log.warning("No flight sheet configured, cannot start miner")
+        return started
+
+    def _stop_process(self, proc, label="miner"):
+        if proc and proc.poll() is None:
+            log.info("Stopping %s (PID %d)", label, proc.pid)
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait(timeout=5)
+            except Exception as e:
+                log.error("Error stopping %s: %s", label, e)
 
     def stop(self):
-        """Stop the miner process."""
-        if self.process and self.process.poll() is None:
-            log.info("Stopping miner (PID %d)", self.process.pid)
-            try:
-                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
-                self.process.wait(timeout=5)
-            except Exception as e:
-                log.error("Error stopping miner: %s", e)
+        """Stop all miner processes."""
+        self._stop_process(self.process, "GPU miner")
+        self._stop_process(self.cpu_process, "CPU miner")
         self.process = None
+        self.cpu_process = None
         if PID_PATH.exists():
             PID_PATH.unlink()
 
     def restart(self):
-        """Restart the miner."""
+        """Restart all miners."""
         self.stop()
         time.sleep(2)
         self.start()
@@ -905,6 +963,11 @@ class MinerManager:
         if self.process is None:
             return False
         return self.process.poll() is None
+
+    def is_cpu_running(self) -> bool:
+        if self.cpu_process is None:
+            return False
+        return self.cpu_process.poll() is None
 
     def get_pid(self) -> int | None:
         if self.process and self.is_running():
