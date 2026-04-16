@@ -116,6 +116,7 @@ async def get_rig_stats(name: str):
     rig = Rig.get_by_name(db, name)
     if not rig:
         raise HTTPException(404)
+    pool = get_pool()
     loop = asyncio.get_event_loop()
     try:
         stdout, _, rc = await loop.run_in_executor(
