@@ -15,13 +15,17 @@
         "cpuminer-opt": "/opt/mfarm/miners/cpuminer",
         "trex": "/opt/mfarm/miners/t-rex",
         "lolminer": "/opt/mfarm/miners/lolMiner",
-        "xmrig": "/opt/mfarm/miners/xmrig"
+        "xmrig": "/opt/mfarm/miners/xmrig",
+        "miniz": "/opt/mfarm/miners/miniZ",
+        "srbminer": "/opt/mfarm/miners/SRBMiner-Multi"
     },
     "api_ports": {
         "ccminer": 4068,
         "trex": 4067,
         "lolminer": 44444,
         "cpuminer-opt": 4048,
-        "xmrig": 44445
+        "xmrig": 44445,
+        "miniz": 20000,
+        "srbminer": 21550
     }
 }

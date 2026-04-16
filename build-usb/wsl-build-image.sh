@@ -234,14 +234,15 @@ tail -n 50 -f /var/log/mfarm/miner.log
 MINERCMD
 chmod +x "$MNT/usr/local/bin/miner"
 
-# Miners (optional)
-cd /tmp
-tar xzf "$SRC/ccminer-patch/hiveos/ccminer-6390-v21.1.1.tar.gz" 2>/dev/null || true
-cp /tmp/ccminer "$MNT/opt/mfarm/miners/ccminer" 2>/dev/null || echo "WARN: ccminer not found"
-chmod +x "$MNT/opt/mfarm/miners/ccminer" 2>/dev/null || true
-tar xzf "$SRC/build-usb/mfarm-files/xmrig-nodevfee-hiveos.tar.gz" 2>/dev/null || true
-cp /tmp/xmrig-nodevfee/xmrig "$MNT/opt/mfarm/miners/xmrig" 2>/dev/null || echo "WARN: xmrig not found"
-chmod +x "$MNT/opt/mfarm/miners/xmrig" 2>/dev/null || true
+# Download all miners into image
+cp "$SRC/mfarm/worker/miner-downloader.sh" "$MNT/opt/mfarm/miner-downloader.sh"
+chmod +x "$MNT/opt/mfarm/miner-downloader.sh"
+chroot "$MNT" bash /opt/mfarm/miner-downloader.sh all
+
+# Also copy ccminer custom build if available
+tar xzf "$SRC/ccminer-patch/hiveos/ccminer-6390-v21.1.1.tar.gz" -C /tmp 2>/dev/null && \
+    cp /tmp/ccminer "$MNT/opt/mfarm/miners/ccminer" && \
+    chmod +x "$MNT/opt/mfarm/miners/ccminer" || true
 
 # CUDA runtime
 cp "${MEOWOS_CUDA_DEB:-/mnt/c/Users/benef/libcudart12.deb}" "$MNT/tmp/libcudart12.deb" 2>/dev/null || echo "WARN: libcudart12.deb not found"

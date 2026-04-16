@@ -139,6 +139,25 @@ _register(MinerDefinition(
 ))
 
 
+_register(MinerDefinition(
+    name="srbminer",
+    display_name="SRBMiner-Multi",
+    binary_name="SRBMiner-Multi",
+    supported_algos=[
+        "randomx", "rx/0", "rx/wow", "rx/arq",
+        "ethash", "etchash", "autolykos2",
+        "kawpow", "blake3", "sha256dt",
+        "ghostrider", "dynamo", "yespower",
+        "verthash", "heavyhash", "karlsenhash",
+        "pyrinhash", "sha512_256d_radiant",
+    ],
+    gpu_type="any",
+    api_type="srbminer_http",
+    default_api_port=21550,
+    supports_solo=False,
+))
+
+
 def get_miner(name: str) -> MinerDefinition | None:
     return MINERS.get(name.lower())
 

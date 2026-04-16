@@ -41,6 +41,8 @@ MINERS = [
      "algos": ["randomx","rx/0","rx/wow","kawpow","ghostrider","cn/r","argon2/chukwa"]},
     {"name": "miniz", "display": "miniZ", "gpu": "nvidia", "solo": False,
      "algos": ["equihash144_5","equihash192_7","beamhashiii","ethash","etchash","progpow","octopus"]},
+    {"name": "srbminer", "display": "SRBMiner-Multi", "gpu": "any", "solo": False,
+     "algos": ["randomx","ethash","etchash","autolykos2","kawpow","blake3","sha256dt","ghostrider","yespower","verthash","heavyhash","karlsenhash","pyrinhash"]},
 ]
 
 

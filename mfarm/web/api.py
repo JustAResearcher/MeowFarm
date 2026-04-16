@@ -629,5 +629,23 @@ def get_groups():
 @router.get("/miners")
 def get_miners():
     return [{"name": m.name, "display_name": m.display_name,
-             "gpu_type": m.gpu_type, "algos": m.supported_algos}
+             "gpu_type": m.gpu_type, "algos": m.supported_algos,
+             "supports_solo": m.supports_solo}
             for m in list_miners()]
+
+
+@router.post("/rigs/{name}/update-miners")
+async def update_miners(name: str):
+    """Update all miner binaries on a rig."""
+    db = get_db()
+    rig = Rig.get_by_name(db, name)
+    if not rig:
+        raise HTTPException(404, f"Rig '{name}' not found")
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            _executor, lambda r=rig: pool.exec(r, "sudo bash /opt/mfarm/miner-downloader.sh all", timeout=300)
+        )
+        return {"status": "updated", "output": result.get("stdout", "")}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}

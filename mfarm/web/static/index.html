@@ -721,6 +721,7 @@ function openRig(name) {
       <button class="btn" onclick="openSSH('${name}')">SSH Terminal</button>
       <button class="btn" onclick="viewMinerLog('${name}','gpu')">GPU Miner Log</button>
       <button class="btn" onclick="viewMinerLog('${name}','cpu')">CPU Miner Log</button>
+      <button class="btn" onclick="updateMiners('${name}')">Update Miners</button>
       <button class="btn" onclick="renameRig('${name}')">Rename</button>
       <button class="btn danger" onclick="deleteRig('${name}')">Remove Rig</button>
     </div>
@@ -936,6 +937,15 @@ async function minerCmd(name, type, command) {
   } catch(e) {
     el.textContent += `Error: ${e.message}`;
   }
+}
+
+async function updateMiners(name) {
+  if (!confirm(`Update all miner binaries on "${name}"? This may take a few minutes.`)) return;
+  try {
+    const r = await fetch(`/api/rigs/${name}/update-miners`, { method: 'POST' });
+    const d = await r.json();
+    alert(d.status === 'updated' ? 'Miners updated!' : 'Error: ' + d.error);
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 async function renameRig(name) {

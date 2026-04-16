@@ -80,6 +80,15 @@ case "$MINER" in
         exec "$BINARY" -a "$ALGO" -o "$POOL" -u "$WALLET.$WORKER" -p "$PASSWORD" \
             --http-host=0.0.0.0 --http-port="$API_PORT" $EXTRA_ARGS
         ;;
+    srbminer)
+        exec "$BINARY" --algorithm "$ALGO" --pool "$POOL" --wallet "$WALLET" \
+            --worker "$WORKER" --password "$PASSWORD" \
+            --api-enable --api-port "$API_PORT" $EXTRA_ARGS
+        ;;
+    miniz)
+        exec "$BINARY" --algo "$ALGO" --url "$WALLET@$POOL" \
+            --telemetry="$API_PORT" --pers auto $EXTRA_ARGS
+        ;;
     *)
         echo "Unknown miner: $MINER"
         exit 1
